@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@source "./";
+@custom-variant dark (&:where(.dark, .dark *));
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--secondary);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+:root {
+  --radius: 0.5rem;
+  --background: #111619;
+  --foreground: #e4e9ee;
+  --card: #181e22;
+  --popover: #20282e;
+  --primary: #61b0ff;
+  --primary-foreground: #071a2e;
+  --secondary: #28333c;
+  --muted: #20282e;
+  --muted-foreground: #a4b0ba;
+  --border: #35414a;
+  --input: #42515d;
+  --ring: #61b0ff;
+  --destructive: #ff8a91;
+  --success: #41ce88;
+  --warning: #e4ba72;
+}
+:root[data-theme='light'] {
+  --background: #f7f9fc;
+  --foreground: #1b2635;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --primary: #1267c9;
+  --primary-foreground: #ffffff;
+  --secondary: #e8eef5;
+  --muted: #edf1f6;
+  --muted-foreground: #566579;
+  --border: #d4dde7;
+  --input: #b8c5d5;
+  --ring: #1267c9;
+  --destructive: #bc2535;
+  --success: #18794e;
+  --warning: #8a5b12;
+}
+@media (prefers-color-scheme: light) {
+  :root[data-theme='system'] {
+    --background: #f7f9fc;
+    --foreground: #1b2635;
+    --card: #fff;
+    --popover: #fff;
+    --primary: #1267c9;
+    --primary-foreground: #fff;
+    --secondary: #e8eef5;
+    --muted: #edf1f6;
+    --muted-foreground: #566579;
+    --border: #d4dde7;
+    --input: #b8c5d5;
+    --ring: #1267c9;
+    --destructive: #bc2535;
+    --success: #18794e;
+    --warning: #8a5b12;
+  }
+}
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role='checkbox']:not([data-disabled]) {
+    cursor: pointer;
+  }
+}

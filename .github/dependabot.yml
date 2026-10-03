@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # These database drivers are pinned to exact versions in package.json. Upgrade
+      # them by hand together with the real-database integration tests.
+      - dependency-name: mssql
+      - dependency-name: tedious
+      - dependency-name: msnodesqlv8
+      - dependency-name: pg
+      - dependency-name: iconv-lite
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

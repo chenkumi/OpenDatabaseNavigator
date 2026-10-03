@@ -1,0 +1,42 @@
+name: database-workspace-integration
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: workspace
+      POSTGRES_PASSWORD: ${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}
+      POSTGRES_DB: workspace
+    ports: ['127.0.0.1:15432:5432']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U workspace']
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}
+      MYSQL_DATABASE: workspace
+    ports: ['127.0.0.1:13306:3306']
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}
+      MARIADB_DATABASE: workspace
+    ports: ['127.0.0.1:13307:3306']
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}
+    ports: ['127.0.0.1:11433:1433']
+  redis:
+    image: redis:7.4
+    ports: ['127.0.0.1:16379:6379']
+    command: ['redis-server', '--requirepass', '${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}']
+
+  redis-json:
+    image: redis:8.2
+    ports: ['127.0.0.1:16380:6379']
+    command: ['redis-server', '--requirepass', '${DB_TEST_PASSWORD:?Set DB_TEST_PASSWORD}']

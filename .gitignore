@@ -1,0 +1,86 @@
+# Dependencies and build output
+node_modules/
+dist/
+release/
+
+# Packaged installers and archives
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.tgz
+
+# Per-user assistant settings
+.claude/settings.local.json
+
+# Test reports and tool caches
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+.cache/
+.vite/
+*.tsbuildinfo
+*.class
+*.jar
+
+# Logs and local working files
+logs/
+*.log
+.local/
+.tmp/
+/tmp/
+/temp/
+
+# Environment files; keep reusable templates under version control
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!.env.sample
+!.env.template
+!*.env.example
+!*.env.sample
+!*.env.template
+
+# Local database files and SQLite journal/WAL/SHM companions
+*.db
+*.db3
+*.sqlite
+*.sqlite3
+*.db-*
+*.db3-*
+*.sqlite-*
+*.sqlite3-*
+
+# Desktop runtime data when the data directory is the repository root
+/credentials.json
+/connections.json
+/settings.json
+/workspace.json
+/permissions.json
+/approvals.json
+/audit.json
+/history.json
+
+# Private keys and certificate bundles
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+# Public, localhost-only HTTPS fixtures (see tests/fixtures/README.md)
+!/tests/fixtures/localhost-test-key.pem
+!/tests/fixtures/localhost-test-cert.pem
+
+# OS and editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+*.swp
+*.swo
+*~

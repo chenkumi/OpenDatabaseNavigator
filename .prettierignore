@@ -1,0 +1,9 @@
+node_modules
+dist
+release
+package-lock.json
+docs/architecture
+docs/history
+logs
+.local
+licenses

@@ -1,0 +1,184 @@
+[
+  {
+    "name": "button",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/button.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "input",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/input.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "textarea",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/textarea.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "label",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/label.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "checkbox",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/checkbox.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "select",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/select.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "dialog",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/dialog.json",
+    "dependencies": [
+      "cn"
+    ],
+    "registryDependencies": [
+      "button"
+    ]
+  },
+  {
+    "name": "alert-dialog",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/alert-dialog.json",
+    "dependencies": [
+      "cn"
+    ],
+    "registryDependencies": [
+      "button"
+    ]
+  },
+  {
+    "name": "popover",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/popover.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "dropdown-menu",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/dropdown-menu.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "context-menu",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/context-menu.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "tabs",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/tabs.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "collapsible",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/collapsible.json"
+  },
+  {
+    "name": "tooltip",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/tooltip.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "badge",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/badge.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "alert",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/alert.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "table",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/table.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "breadcrumb",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/breadcrumb.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "separator",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/separator.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "resizable",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/resizable.json",
+    "dependencies": [
+      "cn",
+      "react-resizable-panels"
+    ]
+  },
+  {
+    "name": "combobox",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/combobox.json",
+    "dependencies": [
+      "cn",
+      "@base-ui/react"
+    ],
+    "registryDependencies": [
+      "button",
+      "input-group"
+    ]
+  },
+  {
+    "name": "input-group",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/input-group.json",
+    "dependencies": [
+      "cn"
+    ],
+    "registryDependencies": [
+      "button",
+      "input",
+      "textarea"
+    ]
+  },
+  {
+    "name": "scroll-area",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/scroll-area.json",
+    "dependencies": [
+      "cn"
+    ]
+  },
+  {
+    "name": "switch",
+    "url": "https://ui.shadcn.com/r/styles/base-nova/switch.json",
+    "dependencies": [
+      "cn"
+    ]
+  }
+]

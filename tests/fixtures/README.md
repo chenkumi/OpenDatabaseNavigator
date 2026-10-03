@@ -1,0 +1,1 @@
+The localhost certificate and private key are public, test-only fixtures for verified HTTPS MCP tests. They must never be used by a deployed server. The certificate is self-signed, trusted only by the individual test request, and contains localhost/127.0.0.1 SANs.

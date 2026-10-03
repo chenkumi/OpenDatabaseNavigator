@@ -1,0 +1,431 @@
+/* Shared UI parameters. Spec: .agents/skills/database-workspace-ui/SKILL.md */
+:root {
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-6: 24px;
+  --ui-font: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+  --ui-mono: Consolas, 'Cascadia Code', monospace;
+  --ui-text: 13px;
+  --ui-text-small: 12px;
+  --ui-line: 20px;
+  --ui-control: 32px;
+  --ui-control-small: 28px;
+  --ui-control-dense: 24px;
+  --ui-control-large: 36px;
+  --ui-menu-row: 36px;
+  --ui-radius: 6px;
+}
+body {
+  font-family: var(--ui-font);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+}
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+small {
+  font-size: var(--ui-text-small);
+  line-height: 18px;
+}
+
+/* ui-button survives Base UI render composition when the outer primitive replaces data-slot. */
+.ui-button {
+  height: var(--ui-control);
+  gap: var(--ui-space-2);
+  padding: 0 var(--ui-space-3);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+  border-radius: var(--ui-radius);
+}
+.ui-button[data-size='xs'] {
+  height: var(--ui-control-dense);
+  padding-inline: var(--ui-space-2);
+  font-size: var(--ui-text-small);
+}
+.ui-button[data-size='sm'] {
+  height: var(--ui-control-small);
+}
+.ui-button[data-size='lg'] {
+  height: var(--ui-control-large);
+}
+.ui-button[data-size^='icon'] {
+  width: var(--ui-control);
+  height: var(--ui-control);
+  flex: 0 0 auto;
+  padding: 0;
+}
+.ui-button[data-size='icon-xs'] {
+  width: var(--ui-control-dense);
+  height: var(--ui-control-dense);
+  font-size: var(--ui-text-small);
+}
+.ui-button[data-size='icon-sm'] {
+  width: var(--ui-control-small);
+  height: var(--ui-control-small);
+}
+.ui-button[data-size='icon-lg'] {
+  width: var(--ui-control-large);
+  height: var(--ui-control-large);
+}
+[data-slot='input'],
+[data-slot='select-trigger'],
+[data-slot='input-group'] {
+  height: var(--ui-control);
+  border-radius: var(--ui-radius);
+  font-size: var(--ui-text);
+}
+[data-slot='input'],
+[data-slot='select-trigger'] {
+  padding: var(--ui-space-1) var(--ui-space-3);
+  line-height: var(--ui-line);
+}
+[data-slot='input-group'] input {
+  height: 100%;
+  font-size: inherit;
+}
+[data-slot='input-group-addon'][data-align^='inline'] {
+  padding-block: 0;
+}
+[data-slot='select-trigger'][data-size='sm'] {
+  height: var(--ui-control-small);
+}
+[data-slot='textarea'] {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  border-radius: var(--ui-radius);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+}
+[data-slot='label'] {
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+  gap: var(--ui-space-2);
+}
+[data-slot='checkbox'] {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+:is(
+  [data-slot='dropdown-menu-content'],
+  [data-slot='context-menu-content'],
+  [data-slot='dropdown-menu-sub-content'],
+  [data-slot='context-menu-sub-content']
+) {
+  min-width: 180px;
+  padding: var(--ui-space-1);
+  border-radius: 8px;
+}
+:is(
+  [data-slot='dropdown-menu-item'],
+  [data-slot='context-menu-item'],
+  [data-slot='dropdown-menu-sub-trigger'],
+  [data-slot='context-menu-sub-trigger'],
+  [data-slot='dropdown-menu-checkbox-item'],
+  [data-slot='context-menu-checkbox-item'],
+  [data-slot='dropdown-menu-radio-item'],
+  [data-slot='context-menu-radio-item'],
+  [data-slot='select-item'],
+  [data-slot='combobox-item']
+) {
+  min-height: var(--ui-menu-row);
+  padding-block: var(--ui-space-2);
+  padding-inline: var(--ui-space-3);
+  gap: var(--ui-space-2);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+:is(
+  [data-slot='dropdown-menu-checkbox-item'],
+  [data-slot='context-menu-checkbox-item'],
+  [data-slot='dropdown-menu-radio-item'],
+  [data-slot='context-menu-radio-item'],
+  [data-slot='select-item'],
+  [data-slot='combobox-item']
+) {
+  padding-right: 32px;
+}
+[data-inset][data-inset='true'] {
+  padding-left: 32px;
+}
+:is(
+  [data-slot='dropdown-menu-label'],
+  [data-slot='context-menu-label'],
+  [data-slot='select-label'],
+  [data-slot='combobox-label']
+) {
+  padding: var(--ui-space-2) var(--ui-space-3);
+  font-size: var(--ui-text-small);
+}
+:is(
+  [data-slot='dropdown-menu-item'],
+  [data-slot='context-menu-item'],
+  [data-slot='select-item'],
+  [data-slot='combobox-item']
+)[data-highlighted] {
+  background: var(--secondary);
+}
+[data-slot='tabs-list'] {
+  min-height: var(--ui-control);
+  height: auto;
+  gap: var(--ui-space-1);
+  justify-content: flex-start;
+}
+[data-slot='tabs-trigger'] {
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+  padding-inline: var(--ui-space-3);
+}
+[data-slot='alert'],
+[data-slot='popover-content'] {
+  padding: var(--ui-space-4);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+  border-radius: 8px;
+}
+/* Non-modal notifications sit above the bottom action area. Only their close
+   button captures clicks, so a notification cannot block a pending row action. */
+.toast {
+  bottom: calc(28px + 96px);
+  width: fit-content;
+  max-width: min(560px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast button {
+  pointer-events: auto;
+}
+[data-slot='dialog-title'],
+[data-slot='alert-dialog-title'] {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+[data-slot='table-head'],
+[data-slot='table-cell'] {
+  font-size: var(--ui-text-small);
+}
+
+/* One common object section bar, used by Table, View, Index and Trigger. */
+.designer-tabs[data-slot='tabs-list'] {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  height: auto;
+  flex-shrink: 0;
+  justify-content: flex-start;
+  gap: var(--ui-space-1);
+  padding: var(--ui-space-2) var(--ui-space-3) 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 0;
+  background: var(--panel);
+}
+.designer-tabs [data-slot='tabs-trigger'] {
+  flex: 0 0 auto;
+  min-height: 40px;
+  height: auto;
+  padding: var(--ui-space-2) var(--ui-space-4);
+}
+.object-designer {
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+}
+.view-designer {
+  padding: 0;
+}
+.designer-section {
+  padding: var(--ui-space-4);
+  min-width: 0;
+}
+.designer-section .column-properties {
+  margin: 0;
+}
+.form-grid label:not(.inline) > [data-slot='input'],
+.form-grid label:not(.inline) > [data-slot='select-trigger'],
+.column-property-grid label:not(.inline) > [data-slot='select-trigger'] {
+  width: 100%;
+}
+.column-property-grid .property-wide {
+  grid-column: 1 / -1;
+}
+.sidebar .search,
+.database-sidebar .search {
+  margin-bottom: var(--ui-space-2);
+}
+.connection-list,
+.database-tree {
+  padding-top: var(--ui-space-2);
+}
+.connection-list h4 {
+  margin: var(--ui-space-2);
+}
+.structure-editor .designer-section .object-definition-label,
+.designer-section .object-definition-label {
+  margin: 0 0 var(--ui-space-2);
+}
+.structure-editor .designer-section .object-definition-editor,
+.designer-section .object-definition-editor {
+  margin: 0;
+  width: 100%;
+}
+.editor-help {
+  margin: var(--ui-space-3) 0 0;
+  color: var(--muted-foreground);
+  font-size: var(--ui-text-small);
+}
+.object-definition-editor,
+.create-object-form textarea,
+pre {
+  font-family: var(--ui-mono);
+  font-size: var(--ui-text);
+  line-height: var(--ui-line);
+}
+.database-object-content:has(> .object-designer) {
+  padding: 0;
+}
+.database-object-content > :is(p, dl, .notice) {
+  margin: var(--ui-space-4);
+}
+.database-object-content > .object-change-preview {
+  margin: var(--ui-space-4);
+}
+.create-view-tabs > [data-slot='tabs-content'] {
+  padding-top: var(--ui-space-4);
+}
+.create-view-tabs .column-properties {
+  margin: 0;
+}
+.create-view-tabs label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ui-space-2);
+}
+.create-view-tabs .inline {
+  flex-direction: row;
+}
+
+/* Small windows and split panels keep form fields inside their own region. */
+.designer-section,
+.database-object-content,
+.settings-content {
+  container-type: inline-size;
+}
+@container (max-width: 560px) {
+  .column-property-grid,
+  .form-grid,
+  .type-properties {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .form-grid .col-span-2,
+  .form-grid .wide {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 700px) {
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.modal.sql-script-dialog {
+  width: 920px;
+  max-width: min(920px, calc(100vw - 32px));
+}
+.sql-export-dialog {
+  width: 620px;
+}
+.modal.cell-value-dialog {
+  height: min(560px, calc(100vh - 48px));
+}
+.dialog-sql-preview {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.modal input[type='color'] {
+  padding: var(--ui-space-1);
+}
+.modal.connection-dialog {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(100dvh - 48px);
+}
+.connection-dialog > header,
+.connection-dialog > footer {
+  flex-shrink: 0;
+}
+.connection-content {
+  min-height: 0;
+  overflow: auto;
+  container-type: inline-size;
+  padding: 0 4px 4px;
+}
+.toolbar {
+  flex-shrink: 0;
+}
+.navigation-heading {
+  gap: var(--ui-space-2);
+}
+.connection-main.ui-button {
+  height: auto;
+  min-height: 56px;
+  padding: var(--ui-space-2);
+  gap: var(--ui-space-2);
+}
+.connection-main > span:not(.connection-dot) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.connection strong {
+  max-width: 100%;
+}
+.connection-list h4,
+.connection-main strong,
+.connection-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-branch.ui-button,
+.redis-databases > button.ui-button {
+  min-height: 32px;
+  height: auto;
+  padding: var(--ui-space-1) var(--ui-space-2);
+}
+.object-actions .table-node {
+  min-height: 32px;
+  height: auto;
+  padding: var(--ui-space-1) var(--ui-space-2);
+}
+.key-list button {
+  display: flex;
+  justify-content: flex-start;
+  min-height: 32px;
+  height: auto;
+  white-space: normal;
+  padding: var(--ui-space-2);
+}
+/* Grid geometry is intentionally fixed at the virtualizer's 34px row height. */
+.data-table [data-slot='input'],
+.designer-grid [data-slot='input'],
+.designer-grid [data-slot='input-group'],
+.create-columns [data-slot='input'],
+.create-columns [data-slot='input-group'] {
+  height: var(--ui-control-dense);
+  font-size: var(--ui-text-small);
+}
+.data-head .ui-button {
+  height: auto;
+  padding: 0;
+}
