@@ -35,6 +35,45 @@ npm run test:desktop
 
 `npm run test:desktop:all` 只建置一次，再依序執行所有不需外部服務（Docker 或 Windows）的桌面 smoke；加上 `--all` 會連同整合服務與 Windows 測試一併執行（`node scripts/run-smokes.mjs --all`）。各 smoke 的暫存資料目錄會在腳本結束時自動刪除，除錯時設定 `KEEP_SMOKE_DATA=1` 可保留。整合密碼由 `scripts/support.mjs` 統一讀取：優先使用環境變數 `DB_TEST_PASSWORD`，否則讀取 `.local/integration.env`，兩者都不會被輸出。`npm run test:desktop:all`／`test:packaged` 之外，GitHub Actions 的 `CI` 只執行型別檢查、單元測試與建置；真實資料庫整合測試需手動觸發（`workflow_dispatch`）。`npm test` 會略過所有真實資料庫測試，綠燈不代表資料庫整合已驗證。
 
+## Linux／WSL 執行與安全憑證儲存
+
+WSL 需有 WSLg 或其他可用的顯示服務（`DISPLAY`／Wayland），並安裝 README 所列的 Electron 系統函式庫。Electron 執行檔需另確認已下載；`npm ci` 成功不等於桌面環境已可執行。
+
+Linux 密碼儲存必須有可用且已解鎖的 Secret Service／KWallet。WSLg 提供視窗，不會自動替你準備 keyring；程式會拒絕 Electron 的 `basic_text` 後端，不提供明文備援。Ubuntu 可由使用者在自己的終端安裝：
+
+```sh
+sudo apt-get update
+sudo apt-get install gnome-keyring libsecret-1-0 libsecret-tools seahorse
+gnome-keyring-daemon --start --components=secrets
+seahorse
+```
+
+在 Seahorse 建立或解鎖預設密碼 keyring，使用非空的主密碼。WSL 未經桌面 PAM 登入時，keyring 可能不會自動解鎖，需在新工作階段手動解鎖。不要把登入／keyring 密碼提供給 Agent、放入環境變數或寫入專案檔案，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。
+
+```sh
+busctl --user list | grep org.freedesktop.secrets
+npm run check:secure-storage
+# WSL 缺少桌面識別時，可明確測試 libsecret：
+npm run check:secure-storage -- --password-store=gnome-libsecret
+```
+
+檢查指令啟動真正 Electron，使用隔離的暫存設定檔與固定、非機密的測試字串，不讀取既有憑證。只有安全 backend 可用且加解密往返成功才退出 0；未安裝／未解鎖／逾時則退出 1。不能只以 D-Bus 名稱存在判定可保存密碼。
+
+若明確指定 libsecret 的檢查通過，但預設檢查仍選到 `basic_text`，正式啟動也需使用同一個 backend：
+
+```sh
+npm run build
+npm start -- --password-store=gnome-libsecret
+# 開發模式可為該程序提供桌面識別：
+XDG_CURRENT_DESKTOP=GNOME npm run dev
+```
+
+backend 說明以 Electron safeStorage 官方文件為準。切換 backend 前先確保原本儲存憑證的 keyring 仍可存取；不保證不同 backend 能解密既有憑證。
+
+WSL 的 renderer 建置可能需要數分鐘，不要僅因短時間沒有新輸出就判定失敗。一般測試可用 `npm test -- --maxWorkers=2` 降低並行負載；不可藉提高逾時、略過測試來掩蓋已重現的錯誤。SQLite 一般查詢現在使用獨立子程序，取消／逾時會終止原生呼叫，等待退出再開新 session，避免舊呼叫持續持有檔案鎖。取消不會撤銷先前已提交的操作，且記憶體資料庫在 session 被終止後會遺失。
+
+`test:desktop` 在 WSL 顯示隔離測試視窗，確保真實滑鼠拖曳有 compositor frame；其他平台仍維持原有隱藏視窗流程。下拉選項 smoke 使用真實鍵盤選取，沒有強制 click 或略過行為驗證。
+
 ## Windows 發行包
 
 ```sh

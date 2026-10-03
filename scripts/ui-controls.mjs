@@ -13,7 +13,11 @@ export async function selectValue(page, trigger, value) {
     .locator(`[id=${JSON.stringify(listId)}]`)
     .getByRole('option')
     .and(page.locator(`[data-value=${JSON.stringify(String(value))}]`));
-  await item.click();
+  // Hidden Electron windows can stop compositor frames during a popup's zoom
+  // animation. Keyboard selection does not wait forever for pointer stability
+  // and still exercises Base UI's real option/focus handlers.
+  await expect(item).toBeVisible();
+  await item.press('Enter');
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 }
 export async function acceptConfirmation(page) {

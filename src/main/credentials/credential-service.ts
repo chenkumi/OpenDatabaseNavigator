@@ -32,7 +32,11 @@ export class CredentialService implements Credentials {
     this.store.write(data);
   }
   private requireEncryption() {
-    if (!this.encryption.isEncryptionAvailable())
-      throw new Error('OS secure credential storage is unavailable.');
+    if (!this.encryption.isEncryptionAvailable()) {
+      const hint = process.platform === 'linux'
+        ? ' Install and unlock a Secret Service keyring, then restart the app. Run npm run check:secure-storage; see docs/USER_GUIDE.md. Plaintext fallback is not allowed.'
+        : '';
+      throw new Error(`OS secure credential storage is unavailable.${hint}`);
+    }
   }
 }

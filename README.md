@@ -21,7 +21,7 @@
 
 ## 快速開始
 
-需求：**Node.js 24+** 與 npm。
+需求：**Node.js 24+** 與 npm。Linux／WSL 使用者另請完成下方的 [Linux／WSL 安全儲存與啟動設定](#linuxwsl-安全儲存與啟動設定)，才能安全保存資料庫密碼。
 
 ```sh
 npm ci             # 依 package-lock.json 安裝
@@ -69,6 +69,76 @@ node -e "require('msnodesqlv8'); console.log('Native ODBC bridge loaded')"
 - PostgreSQL SQL 匯出：安裝相容伺服器版本的 `pg_dump`（macOS 可用 Homebrew `libpq`，需加入 PATH 或在連線設定指定絕對路徑）。
 - SQL Server SQL 匯出：PowerShell 與可載入的 `SqlServer` 模組；非 Windows 需 `pwsh`。
 - ASE JDBC／匯出：JDK 11+、合法取得的 SAP `jconn4.jar`；原生結構匯出另需 `DDLGen.jar`。ASE 仍為實驗性支援，真機未驗收。
+
+### Linux／WSL 安全儲存與啟動設定
+
+**Linux 不一定需要特殊啟動參數，但必須有可用且已解鎖的安全憑證儲存服務。** 已有 GNOME Keyring／KWallet 的桌面環境可能不需要額外設定；WSLg 提供圖形視窗，不代表已配置 keyring。Electron 系統函式庫與顯示服務用來啟動視窗，keyring 則用來安全保存密碼，是兩個不同的前置條件。
+
+以下以 **Ubuntu 24.04／WSL2＋WSLg、GNOME Keyring** 為例；其他 Linux 桌面請沿用適合自己的安全 backend，不要一律強制使用 GNOME。
+
+#### 1. 一次性準備
+
+先確認 WSLg 或其他顯示服務可用，並安裝前述 Electron 系統函式庫。專案相依與 Electron 執行檔的安裝方式見「快速開始」。若尚未有安全儲存服務，在自己的終端安裝：
+
+```sh
+sudo apt-get update
+sudo apt-get install gnome-keyring libsecret-1-0 libsecret-tools seahorse
+```
+
+套件通常只需安裝一次，不必每次啟動程式都重新安裝。
+
+#### 2. 啟動並解鎖 keyring
+
+```sh
+gnome-keyring-daemon --start --components=secrets
+seahorse
+```
+
+在 Seahorse 建立或解鎖預設密碼 keyring，設定**非空的主密碼**。WSL 工作階段可能沒有桌面登入的自動解鎖流程，重新登入／重啟 WSL 後需確認服務仍在運作且 keyring 已解鎖；已自動啟動並解鎖時不用重複操作。
+
+**不要把 sudo／keyring 密碼提供給 Agent、寫入專案或環境變數，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。** 本專案拒絕 `basic_text` 後端，不提供明文備援。
+
+#### 3. 驗證安全儲存
+
+在專案根目錄執行：
+
+```sh
+npm run check:secure-storage
+# 預設 backend 不可用時，明確檢查 GNOME libsecret：
+npm run check:secure-storage -- --password-store=gnome-libsecret
+```
+
+指定 libsecret 的成功結果應包含以下內容，且命令退出碼為 **0**：
+
+```json
+{
+  "backend": "gnome_libsecret",
+  "available": true,
+  "roundtrip": true
+}
+```
+
+檢查使用真正 Electron、隔離設定檔與非機密測試字串，不讀取既有密碼。若仍顯示 `available: false`、`roundtrip: false` 或逾時，先確認 keyring 服務及解鎖狀態，不要只因安裝成功就視為可用。
+
+#### 4. 使用通過檢查的 backend 啟動
+
+如果預設檢查通過，可使用一般 `npm start`。**目前已驗證的 WSL 環境預設仍選到 `basic_text`，需明確指定 libsecret：**
+
+```sh
+npm run build
+npm start -- --password-store=gnome-libsecret
+```
+
+`npm run build` 在初次執行或原始碼變更後執行即可，不必每次啟動都重建。開發模式可為該程序提供 GNOME 桌面識別；先確認相同環境設定下的檢查通過，再啟動：
+
+```sh
+XDG_CURRENT_DESKTOP=GNOME npm run check:secure-storage
+XDG_CURRENT_DESKTOP=GNOME npm run dev
+```
+
+本次 WSL 已驗證指定 libsecret 的正式程式可以保存加密憑證，且重新啟動後仍可解密；開發模式的上述桌面識別方式需依自己的環境確認。切換 backend 前，確保原本的 keyring 仍可存取，不保證不同 backend 能解密既有憑證。
+
+詳細設定與限制見 [使用與開發指南](docs/USER_GUIDE.md#linuxwsl-執行與安全憑證儲存)，驗收結果見 [WSL keyring 安全儲存驗收](report/REPORT-2026-10-03T06-52-37-782Z.md)。
 
 ### 打包與發布
 

@@ -28,8 +28,12 @@ try {
   page = await desktop.firstWindow();
   page.setDefaultTimeout(15000);
   await desktop.evaluate(({ BrowserWindow }) => {
-    for (const window of BrowserWindow.getAllWindows())
+    for (const window of BrowserWindow.getAllWindows()) {
       window.webContents.setBackgroundThrottling(false);
+      // WSLg can suspend compositor frames in hidden windows even when JS
+      // throttling is disabled. Real pointer/drag checks need a visible surface.
+      if (process.platform === 'linux' && process.env.WSL_DISTRO_NAME) window.show();
+    }
   });
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '探索資料，從這裡開始。' }).waitFor();

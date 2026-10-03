@@ -1,20 +1,20 @@
-import { Worker } from 'node:worker_threads';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type { Column, QueryResult, TableInfo, TableRef } from '../../../../shared/types';
 import type { QueryOptions, SqlAdapter } from '../../adapter';
 import type { ScriptExecute } from '../../script-session';
 import { sqliteScriptSession } from './script-process';
 import { sqliteSqlExport } from './export-process';
 
-// A separate thread keeps Electron responsive and permits hard cancellation of
-// synchronous SQLite execution, including expensive recursive queries.
-const workerSource = String.raw`
-const { parentPort, workerData } = require('node:worker_threads');
+// A JS worker cannot interrupt SQLite inside a native call. A dedicated process
+// keeps Electron responsive and can be killed before another session takes locks.
+const processSource = String.raw`
 const { DatabaseSync } = require('node:sqlite');
-const db = new DatabaseSync(workerData.file);
+const db = new DatabaseSync(process.argv[1]);
 db.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 const quote = name => '"' + name.replaceAll('"', '""') + '"';
 const normalize = value => typeof value === 'bigint' ? value.toString() : value instanceof Uint8Array ? Buffer.from(value).toString('base64') : value;
-parentPort.on('message', ({ id, action, payload }) => {
+process.on('disconnect', () => process.exit(0));
+process.on('message', ({ id, action, payload }) => {
   try {
     let result;
     if (action === 'query') {
@@ -73,10 +73,10 @@ parentPort.on('message', ({ id, action, payload }) => {
     else if (action === 'tables') result = db.prepare("SELECT name, type FROM " + quote(payload.schema || 'main') + ".sqlite_schema WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(row => ({ name: row.name, kind: row.type, schema: payload.schema || 'main' }));
     else if (action === 'describe') result = db.prepare('PRAGMA ' + quote(payload.schema || 'main') + '.table_xinfo(' + quote(payload.table) + ')').all().filter(row => row.hidden !== 1).map(row => ({ name: row.name, type: row.type, nullable: !row.notnull && !row.pk, defaultValue: row.dflt_value, primaryKey: !!row.pk, generated: row.hidden === 2 || row.hidden === 3 }));
     else if (action === 'close') { db.close(); result = true; }
-    parentPort.postMessage({ id, result });
-  } catch (error) { parentPort.postMessage({ id, error: error.message }); }
+    process.send({ id, result });
+  } catch (error) { process.send({ id, error: error.message }); }
 });
-parentPort.postMessage({ ready: true });
+process.send({ ready: true });
 `;
 export class SqliteAdapter implements SqlAdapter {
   async exportSql(options: import('../../../../shared/sql-export').SqlExportOptions) {
@@ -85,91 +85,131 @@ export class SqliteAdapter implements SqlAdapter {
   async withScriptSession<T>(task: (execute: ScriptExecute) => Promise<T>): Promise<T> {
     return sqliteScriptSession(this.file, task);
   }
-  private worker?: Worker;
-  // terminate() cannot interrupt a native SQLite call, so a stopped worker may keep
-  // running (and holding locks) until the statement ends. Never start a second
-  // thread against the same file while the old one is still stopping.
+  private child?: ChildProcess;
+  private starting?: Promise<void>;
   private retiring?: Promise<void>;
+  private exits = new WeakMap<ChildProcess, Promise<void>>();
   private serial: Promise<unknown> = Promise.resolve();
   private sequence = 0;
   constructor(private file: string) {}
   async connect() {
-    if (this.worker) return;
-    const worker = new Worker(workerSource, { eval: true, workerData: { file: this.file } });
-    await new Promise<void>((resolve, reject) => {
-      worker.once('error', reject);
-      worker.once('message', () => {
-        worker.off('error', reject);
-        resolve();
-      });
+    if (this.starting) return this.starting;
+    if (this.child) return;
+    const starting = this.startProcess();
+    this.starting = starting;
+    try {
+      await starting;
+    } finally {
+      if (this.starting === starting) this.starting = undefined;
+    }
+  }
+  private async startProcess() {
+    await this.retiring;
+    const child = spawn(process.execPath, ['-e', processSource, this.file], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      serialization: 'advanced',
+      windowsHide: true,
     });
-    this.worker = worker;
+    this.child = child;
+    this.exits.set(child, new Promise<void>((resolve) => {
+      const exited = () => {
+        if (this.child === child) this.child = undefined;
+        resolve();
+      };
+      child.once('exit', exited);
+      child.on('error', () => {
+        // Only a failed spawn has no exit event. IPC errors on a live process
+        // must not let its replacement race a still-held SQLite lock.
+        if (!child.pid) exited();
+      });
+    }));
+    await new Promise<void>((resolve, reject) => {
+      const clean = () => {
+        clearTimeout(timer);
+        child.off('message', ready);
+        child.off('error', fail);
+        child.off('exit', exit);
+      };
+      const fail = (error: Error) => {
+        clean();
+        this.stopProcess(child);
+        reject(error);
+      };
+      const exit = () => fail(new Error('SQLite process stopped during startup.'));
+      const ready = (message: any) => {
+        if (!message?.ready) return;
+        clean();
+        resolve();
+      };
+      const timer = setTimeout(() => fail(new Error('SQLite process startup timed out.')), 10_000);
+      child.on('message', ready);
+      child.once('error', fail);
+      child.once('exit', exit);
+    });
+  }
+  private stopProcess(child: ChildProcess) {
+    if (this.child === child) this.child = undefined;
+    // SIGKILL also interrupts a synchronous native call. Always wait for exit,
+    // including reads, before opening a replacement connection to the same file.
+    const stopping = this.exits.get(child)!;
+    this.retiring = stopping;
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    return stopping;
   }
   async disconnect() {
-    const worker = this.worker;
-    this.worker = undefined;
-    if (worker) await worker.terminate();
-  }
-  private async waitForRetiredWorker() {
-    const retiring = this.retiring;
-    if (!retiring) return;
-    let timer: NodeJS.Timeout | undefined;
-    const stopped = await Promise.race([
-      retiring.then(() => true),
-      new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(false), 10_000);
-      }),
-    ]);
-    clearTimeout(timer);
-    if (!stopped)
-      throw new Error('The previous SQLite statement is still stopping. Try again shortly.');
-    if (this.retiring === retiring) this.retiring = undefined;
+    const child = this.child;
+    if (child) await this.stopProcess(child);
+    await this.starting?.catch(() => {});
+    // connect() may still have been awaiting the previous process's exit when
+    // disconnect() started, and only have spawned its child in the meantime.
+    if (this.child) await this.stopProcess(this.child);
+    await this.retiring;
   }
   private request<T>(action: string, payload: unknown, options?: QueryOptions): Promise<T> {
     const run = async (): Promise<T> => {
       if (options?.signal?.aborted) throw new Error('Query cancelled.');
-      await this.waitForRetiredWorker();
       await this.connect();
-      const worker = this.worker!;
+      if (options?.signal?.aborted) throw new Error('Query cancelled.');
+      const child = this.child;
+      if (!child?.connected) throw new Error('Database process stopped.');
       const id = ++this.sequence;
       return new Promise<T>((resolve, reject) => {
+        let settled = false;
         const clean = () => {
+          settled = true;
           clearTimeout(timer);
-          worker.off('message', onMessage);
-          worker.off('error', onError);
-          worker.off('exit', onExit);
+          child.off('message', onMessage);
+          child.off('error', onError);
+          child.off('exit', onExit);
           options?.signal?.removeEventListener('abort', onAbort);
         };
-        const onMessage = (message: { id: number; error?: string; result: T }) => {
-          if (message.id !== id) return;
+        const onMessage = (message: any) => {
+          if (message?.id !== id) return;
           clean();
           message.error ? reject(new Error(message.error)) : resolve(message.result);
         };
         const onError = (error: Error) => {
+          if (settled) return;
           clean();
-          if (this.worker === worker) this.worker = undefined;
+          this.stopProcess(child);
           reject(error);
         };
-        const onExit = () => onError(new Error('Database worker stopped.'));
+        const onExit = () => onError(new Error('Database process stopped.'));
         const stop = (reason: string) => {
           clean();
-          if (this.worker === worker) this.worker = undefined;
-          const stopping = worker.terminate().then(
-            () => undefined,
-            () => undefined,
-          );
-          // Only a statement that may write can still hold the file lock. A verified
-          // read cannot block the next request, so it must not delay it.
-          if (!(options?.readOnly || options?.truncate)) this.retiring = stopping;
+          this.stopProcess(child);
           reject(new Error(reason));
         };
         const onAbort = () => stop('Query cancelled.');
         const timer = setTimeout(() => stop('Query timed out.'), options?.timeout ?? 30000);
-        worker.on('message', onMessage);
-        worker.once('error', onError);
-        worker.once('exit', onExit);
+        child.on('message', onMessage);
+        child.once('error', onError);
+        child.once('exit', onExit);
         options?.signal?.addEventListener('abort', onAbort, { once: true });
-        worker.postMessage({ id, action, payload });
+        child.send({ id, action, payload }, (error) => {
+          if (error) onError(error);
+        });
       });
     };
     const result = this.serial.then(run, run);

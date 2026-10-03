@@ -25,6 +25,7 @@
     "dev": "electron-vite dev",
     "build": "tsc --noEmit && electron-vite build",
     "typecheck": "tsc --noEmit",
+    "check:secure-storage": "node scripts/check-secure-storage.mjs",
     "test": "vitest run",
     "test:integration": "node scripts/test-integration.mjs",
     "integration:up": "node scripts/integration-services.mjs up",
