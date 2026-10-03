@@ -1,4 +1,5 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 // CDP screenshots can wait indefinitely for a compositor frame from a hidden
 // Electron window. Electron's capture API explicitly wakes it without showing it.
@@ -16,5 +17,6 @@ export async function captureDesktop(desktop, path) {
     if (image.isEmpty()) throw new Error('Electron returned an empty screenshot.');
     return image.toPNG().toString('base64');
   });
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(path, Buffer.from(encoded, 'base64'));
 }

@@ -8,6 +8,8 @@ import { captureDesktop } from './capture-desktop.mjs';
 import { scratchDir, isolatedProfile } from './support.mjs';
 
 const dataDir = scratchDir('database-workspace-smoke-');
+const mac = process.platform === 'darwin';
+const modifier = mac ? 'Meta' : 'Control';
 const environment = {
   ...process.env,
   DATABASE_WORKSPACE_DATA_DIR: dataDir,
@@ -81,6 +83,11 @@ try {
       .click(undefined, BrowserWindow.getAllWindows()[0]),
   );
   await page.getByRole('dialog').waitFor();
+  // Visibility precedes completion of the dialog's opening zoom animation.
+  // Measure the settled layout so scrolling is the only variable below.
+  await page.locator('.settings').evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
   const measure = () =>
     page.locator('.settings').evaluate((element) => ({
       header: element.querySelector('header').getBoundingClientRect().top,
@@ -372,7 +379,7 @@ try {
     });
   });
   await page.locator('.tab-content:visible .monaco-editor .view-line').first().click();
-  await page.keyboard.press('Control+End');
+  await page.keyboard.press(mac ? 'Meta+ArrowDown' : 'Control+End');
   await page.keyboard.press('Control+Space');
   await page
     .locator('.suggest-widget.visible')
@@ -380,11 +387,11 @@ try {
     .first()
     .waitFor();
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Control+f');
+  await page.keyboard.press(`${modifier}+f`);
   await page.getByPlaceholder('Find', { exact: true }).fill('SELECT');
   await page.keyboard.press('Escape');
   await page.locator('.tab-content:visible .monaco-editor .view-line').first().click();
-  await page.keyboard.press('Control+h');
+  await page.keyboard.press(mac ? 'Meta+Alt+f' : 'Control+h');
   await page.getByPlaceholder('Replace', { exact: true }).waitFor();
   await page.keyboard.press('Escape');
   await page.evaluate(async () => {
@@ -406,8 +413,8 @@ try {
     });
   });
   await page.locator('.tab-content:visible .monaco-editor .view-line').first().click();
-  await page.keyboard.press('Control+Home');
-  await page.keyboard.press('Control+Shift+ArrowDown');
+  await page.keyboard.press(mac ? 'Meta+ArrowUp' : 'Control+Home');
+  await page.keyboard.press('Shift+ArrowDown');
   await page.getByRole('button', { name: '▶ Run selection', exact: true }).click();
   await page.locator('.tab-content:visible .data-row').filter({ hasText: '21' }).waitFor();
   const selectedSql = await page.evaluate(
@@ -416,9 +423,9 @@ try {
   );
   assert.equal(selectedSql.trim(), 'SELECT 21 AS selected_value;');
   await page.locator('.tab-content:visible .monaco-editor .view-line').first().click();
-  await page.keyboard.press('Control+Home');
-  await page.keyboard.press('Control+Shift+ArrowDown');
-  await page.keyboard.press('Control+Enter');
+  await page.keyboard.press(mac ? 'Meta+ArrowUp' : 'Control+Home');
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press(`${modifier}+Enter`);
   await expect
     .poll(
       async () =>

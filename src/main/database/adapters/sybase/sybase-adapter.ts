@@ -3,6 +3,7 @@ import type { SqlAdapter, QueryOptions } from '../../adapter';
 import { ResultCollector } from '../network/common';
 import { aseColumns, aseTables, aseSchemas, aseDatabases } from './sybase-catalog';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { nativeRelay } from '../network/native-relay';
 import { aseSqlExport } from './sql-export';
 import { openAseJdbcSession } from './jdbc-session';
@@ -34,6 +35,10 @@ export interface AseDriver {
     callback: (error: Error | null, session?: AseSession) => void,
   ): void;
 }
+// Resolve this optional CommonJS native driver only when ASE ODBC is used.
+// Its absence must not prevent building or using the other database engines.
+const requireNativeDriver = createRequire(import.meta.url);
+
 type Meta = { name: string; sqlType: string };
 type Transport = {
   relay: Awaited<ReturnType<typeof nativeRelay>>;
@@ -84,7 +89,7 @@ export class SybaseAdapter implements SqlAdapter {
     private password?: string,
     private loadDriver = async (): Promise<AseDriver> => {
       try {
-        return (await import('msnodesqlv8')).default as unknown as AseDriver;
+        return requireNativeDriver('msnodesqlv8') as AseDriver;
       } catch {
         throw new Error(
           'Sybase ASE requires the msnodesqlv8 native bridge and SAP ASE ODBC driver for this platform.',

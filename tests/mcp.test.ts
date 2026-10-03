@@ -472,10 +472,23 @@ it('serves authenticated MCP over verified TLS and refuses an HTTP origin', asyn
 
 it('an unauthenticated flood does not use up the quota of the token holder', async () => {
   const { url, token } = await fixture();
-  const flood = await Promise.all(Array.from({ length: 130 }, () => fetch(url)));
-  await Promise.all(flood.map((response) => response.arrayBuffer()));
-  expect(flood.filter((response) => response.status === 429).length).toBeGreaterThan(0);
+  // Exercise the per-minute request budget, not the OS TCP accept backlog.
+  // 130 simultaneous new sockets can be reset on macOS before HTTP is handled.
+  const statuses: number[] = [];
+  for (let batch = 0; batch < 13; batch++) {
+    statuses.push(
+      ...(await Promise.all(
+        Array.from({ length: 10 }, async () => {
+          const response = await fetch(url);
+          await response.arrayBuffer();
+          return response.status;
+        }),
+      )),
+    );
+  }
+  expect(statuses.filter((status) => status === 401)).toHaveLength(120);
+  expect(statuses.filter((status) => status === 429)).toHaveLength(10);
   const legitimate = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   await legitimate.arrayBuffer();
-  expect([401, 429]).not.toContain(legitimate.status);
+  expect(legitimate.status).toBe(400); // Authenticated; needs MCP initialization.
 });

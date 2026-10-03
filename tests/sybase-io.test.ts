@@ -59,7 +59,7 @@ async function fixture(tls = false, writeStall = false, host = 'localhost', trus
     socket.once('close', () => sockets.delete(socket));
   });
   server.on('tlsClientError', () => {});
-  server.listen(0, host === '127.0.0.2' ? host : '127.0.0.1');
+  server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const ports: number[] = [];
   const closed: boolean[] = [];
@@ -135,7 +135,10 @@ async function fixture(tls = false, writeStall = false, host = 'localhost', trus
     return socket;
   }) as typeof createConnection;
   const tlsConnector = ((...args: any[]) => {
-    const socket = (tlsConnect as any)(...args);
+    // Route the fixture to the portable loopback address, but preserve the
+    // relay's real TLS options/checkServerIdentity for the original target.
+    // macOS does not bind 127.0.0.2 without configuring a loopback alias.
+    const socket = tlsConnect({ ...args[0], host: '127.0.0.1' });
     if (writeStall && ++upstreamCount === 2) socket.once('data', () => socket.cork());
     return socket;
   }) as typeof tlsConnect;
