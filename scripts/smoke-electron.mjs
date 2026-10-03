@@ -312,6 +312,11 @@ try {
   await expect(page.getByLabel('Value for name', { exact: true })).toHaveValue('Charlie');
   await captureDesktop(desktop, resolve('.local/insert-row-form.png'));
   await page.getByRole('button', { name: 'Insert', exact: true }).click();
+  // A click only submits: InsertRowDialog closes after data.insert and load().
+  // Wait for unmount (including its focus trap), then the table's refresh, so
+  // dialog focus restoration cannot steal the filter's ArrowDown below.
+  await expect(page.locator('.insert-row-dialog')).toHaveCount(0);
+  await expect(page.locator('.table-view .table-operation')).toHaveAttribute('aria-busy', 'false');
   await selectValue(page, page.getByLabel('Filter column', { exact: true }), 'name');
   await page.getByLabel('Filter value', { exact: true }).fill('Charlie');
   await page.getByRole('button', { name: 'Apply', exact: true }).click();

@@ -15,6 +15,8 @@ import { z } from 'zod';
 import { Application, HUMAN } from './application/application';
 import { JsonStore } from './application/services/store';
 import { CredentialService } from './credentials/credential-service';
+import { bootstrapSecureStorage } from './credentials/storage-bootstrap';
+import { SecureStorageService, registerSecureStorageCommands } from './credentials/secure-storage-service';
 import { createAdapter } from './database/factory';
 import { McpGateway, validateMcpConfig } from './mcp/server/mcp-server';
 import { DEFAULT_SETTINGS } from '../shared/types';
@@ -22,6 +24,9 @@ import { settingsSchema } from '../shared/schemas';
 import { installMenu } from './menu';
 import { readSqlFile } from './application/services/sql-file';
 import { writeFile } from 'node:fs/promises';
+
+// Select synchronously, before app ready or any safeStorage initialization.
+const storageSelection = bootstrapSecureStorage(app);
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -67,13 +72,10 @@ function allowDiscard() {
 }
 async function boot() {
   const data = process.env.DATABASE_WORKSPACE_DATA_DIR || app.getPath('userData');
-  const credentials = new CredentialService(new JsonStore(join(data, 'credentials.json'), {}), {
-    isEncryptionAvailable: () =>
-      safeStorage.isEncryptionAvailable() &&
-      (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
-    encryptString: (value) => safeStorage.encryptString(value),
-    decryptString: (value) => safeStorage.decryptString(value),
-  });
+  const secureStorage = new SecureStorageService(safeStorage, storageSelection);
+  const credentials = new CredentialService(
+    new JsonStore(join(data, 'credentials.json'), {}), secureStorage,
+  );
   core = new Application(
     {
       connections: new JsonStore(join(data, 'connections.json'), []),
@@ -85,6 +87,7 @@ async function boot() {
     credentials,
     createAdapter,
   );
+  registerSecureStorageCommands(core.commands, secureStorage);
   // Tabs do not survive a restart; this also clears what an abnormal exit left behind.
   core.workspace.reset();
   gateway = new McpGateway(core, credentials);

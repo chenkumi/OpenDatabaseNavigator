@@ -2122,3 +2122,45 @@ pre {
 .column-property-grid label:not(.inline) {
   align-items: stretch;
 }
+
+/* Diagnostics grow inside the existing scrollable dialog content, never footer. */
+.secure-storage-notice {
+  min-width: 0;
+  margin-top: var(--ui-space-6);
+  overflow-wrap: anywhere;
+}
+.secure-storage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--ui-space-2);
+  margin-bottom: var(--ui-space-2);
+}
+.modal .secure-storage-heading h3 {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--foreground);
+}
+.secure-storage-metadata {
+  margin: var(--ui-space-1) 0 0;
+}
+.secure-storage-guidance {
+  margin-top: var(--ui-space-2);
+  padding: var(--ui-space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--ui-radius);
+  background: var(--card);
+}
+.secure-storage-guidance p {
+  margin-bottom: var(--ui-space-2);
+}
+.secure-storage-guidance p:last-child {
+  margin-bottom: 0;
+}
+.secure-storage-guidance pre {
+  margin: var(--ui-space-2) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -7,6 +7,7 @@ import { Input } from './ui/input';
 import { SelectField } from './SelectField';
 import { Checkbox } from './ui/checkbox';
 import { useI18n } from '../i18n';
+import { SecureStorageNotice, useSecureStorageStatus } from './SecureStorageNotice';
 import { useRef, useState } from 'react';
 import type { Connection } from '../../../shared/types';
 import { command } from '../api';
@@ -26,6 +27,7 @@ export function ConnectionForm({
   onSaved: () => void;
 }) {
   const t = useI18n();
+  const secureStorage = useSecureStorageStatus();
   const [form, setForm] = useState({
     name: '',
     engine: 'sqlite',
@@ -139,6 +141,19 @@ export function ConnectionForm({
         );
         return;
       }
+      // Only a new/replacement password needs encryption. Never gate SQLite,
+      // integrated authentication, or metadata-only/passwordless saves.
+      if (!test && form.engine !== 'sqlite' && payload.password) {
+        const status = await secureStorage.recheck();
+        if (status && !status.available) {
+          setMessage(
+            t(
+              'Cannot save password: secure credential storage is unavailable. Follow the guidance below, then recheck.',
+            ),
+          );
+          return;
+        }
+      }
       try {
         await command(test ? 'connection.test' : 'connection.save', payload);
       } catch (error) {
@@ -154,7 +169,14 @@ export function ConnectionForm({
       if (test) setMessage(t('Connection successful'));
       else onSaved();
     } catch (error) {
-      setMessage((error as Error).message);
+      if ((error as Error).message.startsWith('OS secure credential storage is unavailable.')) {
+        await secureStorage.recheck();
+        setMessage(
+          t(
+            'Secure credential storage is unavailable. Follow the guidance below, then recheck before retrying.',
+          ),
+        );
+      } else setMessage((error as Error).message);
     } finally {
       setBusy(false);
     }
@@ -603,6 +625,10 @@ export function ConnectionForm({
               {message}
             </Alert>
           )}
+          {form.engine !== 'sqlite' &&
+            !(form.engine === 'sqlserver' && form.sqlServerAuth === 'windows') && (
+              <SecureStorageNotice {...secureStorage} />
+            )}
         </div>
         <footer>
           <Button variant="outline" type="button" disabled={busy} onClick={() => void submit(true)}>

@@ -26,6 +26,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "typecheck": "tsc --noEmit",
     "check:secure-storage": "node scripts/check-secure-storage.mjs",
+    "check:linux-artifacts": "node scripts/check-linux-artifacts.mjs",
     "test": "vitest run",
     "test:integration": "node scripts/test-integration.mjs",
     "integration:up": "node scripts/integration-services.mjs up",
@@ -36,6 +37,7 @@
     "test:desktop": "npm run build && node scripts/smoke-electron.mjs",
     "test:desktop:all": "node scripts/run-smokes.mjs",
     "test:packaged": "node scripts/smoke-packaged.mjs",
+    "test:packaged:credentials": "node scripts/smoke-packaged-credentials.mjs",
     "start": "electron .",
     "package": "npm run build && electron-builder --dir",
     "test:desktop:objects": "npm run build && node scripts/smoke-object-tabs.mjs",
@@ -64,6 +66,13 @@
     "appId": "dev.database.workspace",
     "productName": "Database Workspace",
     "npmRebuild": false,
+    "afterPack": "scripts/after-pack.cjs",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
+    "appImage": {
+      "executableArgs": []
+    },
     "asarUnpack": [
       "node_modules/msnodesqlv8/**"
     ],

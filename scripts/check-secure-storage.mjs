@@ -5,28 +5,26 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const policyUrl = new URL('../src/main/credentials/storage-bootstrap.mjs', import.meta.url).href;
+const serviceUrl = new URL('../src/main/credentials/secure-storage-service.mjs', import.meta.url).href;
 const args = process.argv.slice(2);
-if (args.some((arg) => arg !== '--password-store=gnome-libsecret') || args.length > 1) {
-  console.error('Usage: npm run check:secure-storage -- [--password-store=gnome-libsecret]');
+if (args.some((arg) => !/^--password-store(?:=[^\s]*)?$/.test(arg))) {
+  console.error('Usage: npm run check:secure-storage -- [--password-store=<backend>]');
   process.exit(1);
 }
 const dir = await mkdtemp(join(tmpdir(), 'dw-storage-check-'));
-const entry = join(dir, 'check.cjs');
+const entry = join(dir, 'check.mjs');
 const marker = 'DW_STORAGE_CHECK=';
 await writeFile(entry, `
-const { app, safeStorage } = require('electron');
+import { app, safeStorage } from 'electron';
+import { bootstrapSecureStorage } from ${JSON.stringify(policyUrl)};
+import { SecureStorageService } from ${JSON.stringify(serviceUrl)};
+const selection = bootstrapSecureStorage(app);
 app.setPath('userData', ${JSON.stringify(join(dir, 'profile'))});
 app.whenReady().then(() => {
-  const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : process.platform;
-  const available = safeStorage.isEncryptionAvailable();
-  const secure = available && backend !== 'basic_text';
-  let roundtrip = false;
-  if (secure) {
-    const probe = 'Database Workspace secure storage check';
-    roundtrip = safeStorage.decryptString(safeStorage.encryptString(probe)) === probe;
-  }
-  console.log(${JSON.stringify(marker)} + JSON.stringify({ backend, available, roundtrip }));
-  app.exit(secure && roundtrip ? 0 : 1);
+  const status = new SecureStorageService(safeStorage, selection).status();
+  console.log(${JSON.stringify(marker)} + JSON.stringify(status));
+  app.exit(status.available ? 0 : 1);
 }).catch(() => app.exit(1));
 `, 'utf8');
 

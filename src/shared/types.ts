@@ -3,6 +3,16 @@ import type { ColumnProperties, PropertyChange, TableProperties } from './struct
 import type { Generation, GeneratedChange, GenerationCapabilities } from './generated-columns';
 import type { ViewOptions, ViewCapabilities } from './view-options';
 import type { IndexOptions, IndexCapabilities } from './index-options';
+/** Nonsecret diagnostics only; backend is observed, not inferred from a candidate. */
+export interface SecureStorageStatus {
+  platform: string;
+  backend: string;
+  available: boolean;
+  selectionSource: 'explicit' | 'native' | 'wsl-libsecret';
+  /** Unavailable deliberately does not guess whether a keyring is missing or locked. */
+  reason: 'not-checked' | 'available' | 'unavailable' | 'basic-text' | 'restart-required';
+  restartRequired: boolean;
+}
 export type Engine = 'sqlite' | 'mysql' | 'postgres' | 'sqlserver' | 'redis' | 'sybase';
 export type AgentAccess = 'disabled' | 'read' | 'write';
 export type AgentLevel = 'observe' | 'assist' | 'execute';

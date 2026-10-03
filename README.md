@@ -72,73 +72,61 @@ node -e "require('msnodesqlv8'); console.log('Native ODBC bridge loaded')"
 
 ### Linux／WSL 安全儲存與啟動設定
 
-**Linux 不一定需要特殊啟動參數，但必須有可用且已解鎖的安全憑證儲存服務。** 已有 GNOME Keyring／KWallet 的桌面環境可能不需要額外設定；WSLg 提供圖形視窗，不代表已配置 keyring。Electron 系統函式庫與顯示服務用來啟動視窗，keyring 則用來安全保存密碼，是兩個不同的前置條件。
+**視窗與密碼儲存是不同的前置條件。** WSL 需可用的 WSLg／其他顯示服務及前述 Electron 系統函式庫；保存密碼另需可用且已解鎖的 Secret Service／KWallet。WSLg 本身不會配置 keyring。已有 GNOME／KDE 桌面的使用者應沿用原本的安全 backend。
 
-以下以 **Ubuntu 24.04／WSL2＋WSLg、GNOME Keyring** 為例；其他 Linux 桌面請沿用適合自己的安全 backend，不要一律強制使用 GNOME。
+#### 1. 一次性準備（Ubuntu 24.04／WSL2＋WSLg 範例）
 
-#### 1. 一次性準備
-
-先確認 WSLg 或其他顯示服務可用，並安裝前述 Electron 系統函式庫。專案相依與 Electron 執行檔的安裝方式見「快速開始」。若尚未有安全儲存服務，在自己的終端安裝：
+若尚未有安全儲存服務，由使用者在自己的終端執行；套件通常只需安裝一次：
 
 ```sh
 sudo apt-get update
 sudo apt-get install gnome-keyring libsecret-1-0 libsecret-tools seahorse
 ```
 
-套件通常只需安裝一次，不必每次啟動程式都重新安裝。
+#### 2. 每個工作階段確認 D-Bus 與解鎖狀態
 
-#### 2. 啟動並解鎖 keyring
+App 與 keyring 必須能存取同一個使用者的桌面 D-Bus session。已自動啟動並解鎖時不用重複操作；WSL 重啟／重新登入後需重新確認：
 
 ```sh
 gnome-keyring-daemon --start --components=secrets
 seahorse
+busctl --user list | grep org.freedesktop.secrets
 ```
 
-在 Seahorse 建立或解鎖預設密碼 keyring，設定**非空的主密碼**。WSL 工作階段可能沒有桌面登入的自動解鎖流程，重新登入／重啟 WSL 後需確認服務仍在運作且 keyring 已解鎖；已自動啟動並解鎖時不用重複操作。
+在 Seahorse 建立或解鎖預設密碼 keyring，使用**非空的主密碼**。若無法連上使用者 D-Bus，先修復桌面 session，不能只以套件已安裝或服務名稱存在判定可用。
 
-**不要把 sudo／keyring 密碼提供給 Agent、寫入專案或環境變數，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。** 本專案拒絕 `basic_text` 後端，不提供明文備援。
+**不要把 sudo／keyring 密碼提供給 Agent、寫入專案或環境變數，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。** 程式拒絕 `basic_text`，沒有明文備援。
 
-#### 3. 驗證安全儲存
-
-在專案根目錄執行：
+#### 3. 檢查與一般啟動（不需額外參數）
 
 ```sh
 npm run check:secure-storage
-# 預設 backend 不可用時，明確檢查 GNOME libsecret：
-npm run check:secure-storage -- --password-store=gnome-libsecret
+npm run build      # 初次執行或原始碼變更後
+npm start          # 建置結果
+# 或開發模式：
+npm run dev
+# 已打包的 Linux x64 應用可直接執行：
+./release/linux-unpacked/database-workspace
+"./release/Database Workspace-0.1.0.AppImage"
 ```
 
-指定 libsecret 的成功結果應包含以下內容，且命令退出碼為 **0**：
+目前程式在**沒有可辨識原生桌面識別、且沒有明確指定 backend 的 WSL**，會在 Electron ready 前選擇 libsecret；本次 WSL x64 的一般啟動已確認 `backend: gnome_libsecret`、`selectionSource: wsl-libsecret`。原生 GNOME／KDE、其他 Linux、Windows／macOS 與明確指定的選擇仍沿用各自的策略，不需偽造 `XDG_CURRENT_DESKTOP`。
 
-```json
-{
-  "backend": "gnome_libsecret",
-  "available": true,
-  "roundtrip": true
-}
-```
+`check:secure-storage` 使用真正 Electron、隔離設定檔與非機密測試字串；只有安全 backend 可用且加解密往返成功（`available: true`、`roundtrip: true`）才退出 **0**，不讀取既有密碼。失敗時先確認顯示、D-Bus、服務與解鎖狀態。
 
-檢查使用真正 Electron、隔離設定檔與非機密測試字串，不讀取既有密碼。若仍顯示 `available: false`、`roundtrip: false` 或逾時，先確認 keyring 服務及解鎖狀態，不要只因安裝成功就視為可用。
+Settings 與連線表單顯示安全儲存狀態、backend、選擇來源及「重新檢查」。Ubuntu 安裝命令只供使用者手動執行，App 不會執行它們。解鎖後重新檢查；若仍不可用或提示需重新啟動，重啟 App 再檢查。backend 不可用時拒絕新增／替換密碼並保留既有憑證，**不阻止 SQLite 或無密碼連線**。
 
-#### 4. 使用通過檢查的 backend 啟動
-
-如果預設檢查通過，可使用一般 `npm start`。**目前已驗證的 WSL 環境預設仍選到 `basic_text`，需明確指定 libsecret：**
+只有排錯、確認 GNOME Secret Service 時才明確指定 libsecret，不是日常啟動步驟：
 
 ```sh
-npm run build
+npm run check:secure-storage -- --password-store=gnome-libsecret
+# 僅在確認需要同一 backend 後排錯啟動：
 npm start -- --password-store=gnome-libsecret
 ```
 
-`npm run build` 在初次執行或原始碼變更後執行即可，不必每次啟動都重建。開發模式可為該程序提供 GNOME 桌面識別；先確認相同環境設定下的檢查通過，再啟動：
+**不要任意切換已有憑證的 backend。** 不同 backend 不保證能解密既有資料；原 keyring 必須仍可存取，先規劃憑證遷移／重新輸入，程式不會自動遷移。
 
-```sh
-XDG_CURRENT_DESKTOP=GNOME npm run check:secure-storage
-XDG_CURRENT_DESKTOP=GNOME npm run dev
-```
-
-本次 WSL 已驗證指定 libsecret 的正式程式可以保存加密憑證，且重新啟動後仍可解密；開發模式的上述桌面識別方式需依自己的環境確認。切換 backend 前，確保原本的 keyring 仍可存取，不保證不同 backend 能解密既有憑證。
-
-詳細設定與限制見 [使用與開發指南](docs/USER_GUIDE.md#linuxwsl-執行與安全憑證儲存)，驗收結果見 [WSL keyring 安全儲存驗收](report/REPORT-2026-10-03T06-52-37-782Z.md)。
+詳細設定、原生 AppImage 前置條件與本次驗收範圍見 [使用與開發指南](docs/USER_GUIDE.md#linuxwsl-執行與安全憑證儲存)。[早期 WSL keyring 驗收](report/REPORT-2026-10-03T06-52-37-782Z.md)保留當時的啟動需求，並非目前一般啟動方式。
 
 ### 打包與發布
 
@@ -154,11 +142,24 @@ npx electron-builder --win nsis --x64 --publish never
 npx electron-builder --linux AppImage --x64 --publish never
 ```
 
+Linux x64 目前的產物為 `release/linux-unpacked/database-workspace` 與 `release/Database Workspace-0.1.0.AppImage`。版本 **0.1.0** 為未簽章的本機產物；上述命令不會上傳、發布或自動 commit。建立兩種產物後可核對：
+
+```sh
+npm run check:linux-artifacts
+# 真正 keyring 與桌面驗收，PATH 是位置參數：
+npm run test:packaged:credentials -- release/linux-unpacked/database-workspace
+npm run test:packaged:credentials -- "release/Database Workspace-0.1.0.AppImage"
+```
+
+artifact checker 需 `unsquashfs`（Ubuntu 的 `squashfs-tools`），產生含 SHA-256、大小、版本與架構的 `release/linux-artifacts.json`；靜態檢查不等於 GUI／keyring 驗收。本次 10 項 artifact 檢查與兩個完整憑證驗收命令均通過。
+
+AppImage 工具鏈固定 `build.toolsets.appimage: 1.0.3`，使用已驗證的靜態 runtime `dd6cebe`，**目前產物不需安裝主機 `libfuse2`**；仍需可存取的 `/dev/fuse`、原生 FUSE 掛載能力、可用的非特權 user namespace sandbox、顯示服務及已解鎖 keyring。保留 `scripts/after-pack.cjs` 安裝的專案安全 AppRun（來源 `scripts/linux-app-run.sh`），不要換回會停用 sandbox 的 launcher。直接執行，不使用 `--no-sandbox` 或 extract-and-run 備援；主機限制應修復而不是繞過。
+
 首次產製安裝檔還會從 GitHub `electron-userland/electron-builder-binaries` 下載封裝工具；慢速網路可能需等待數分鐘，請確認該站台與下載站台可連線。若需手動準備 macOS `dmgbuild`，必須先核對 electron-builder 該版本指定的官方 SHA-256，再以 `CUSTOM_DMGBUILD_PATH` 指向其絕對路徑，不要使用來源不明的執行檔。
 
-macOS 的一般外部分發另需有效 **Developer ID Application** 憑證、Apple 公證認證及 Gatekeeper 驗證；無憑證的本機打包不等於可供一般使用者安裝的正式發行。Windows 正式分發建議使用發行者簽章；Linux AppImage 執行可能需 FUSE 2 相容套件。不要將簽章／公證憑證或密碼放入版控。
+macOS 的一般外部分發另需有效 **Developer ID Application** 憑證、Apple 公證認證及 Gatekeeper 驗證；無憑證的本機打包不等於可供一般使用者安裝的正式發行。Windows 正式分發建議使用發行者簽章。不要將簽章／公證憑證或密碼放入版控。
 
-Windows 有既有驗證紀錄；本次 macOS arm64 已通過型別檢查、一般測試、建置、桌面／發行包 smoke，並成功產製未簽章 DMG、驗證核對碼及掛載後執行（詳見[修復報告](report/REPORT-2026-10-03T04-40-41-726Z.md)）。Linux 與其他架構仍需在目標平台執行同等驗證；真實網路資料庫整合與正式簽章／公證發布尚未在本次環境驗收。
+Windows 有既有驗證紀錄；先前 macOS arm64 已通過型別檢查、一般測試、建置、桌面／發行包 smoke，並成功產製未簽章 DMG、驗證核對碼及掛載後執行（詳見[修復報告](report/REPORT-2026-10-03T04-40-41-726Z.md)）。本次 Linux x64 在 WSL2＋WSLg 已通過展開應用與原生 AppImage 的安全憑證／重啟／SQLite／一般可見視窗關閉驗收；這不代表所有 Linux 桌面或其他架構都已驗證。本輪未在 Windows、macOS 或實體 KDE／GNOME 桌面做同等驗收，原生選擇策略僅有單元測試保護；既有 Windows／macOS 紀錄仍有效。真實外部資料庫的 143 項測試本輪略過，不能列為通過；正式簽章／公證發布也未驗收。
 
 ## 讓 AI Agent 使用（MCP）
 

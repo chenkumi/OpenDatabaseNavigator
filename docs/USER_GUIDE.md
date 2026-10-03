@@ -37,38 +37,85 @@ npm run test:desktop
 
 ## Linux／WSL 執行與安全憑證儲存
 
-WSL 需有 WSLg 或其他可用的顯示服務（`DISPLAY`／Wayland），並安裝 README 所列的 Electron 系統函式庫。Electron 執行檔需另確認已下載；`npm ci` 成功不等於桌面環境已可執行。
+### 一次性準備與每個工作階段
 
-Linux 密碼儲存必須有可用且已解鎖的 Secret Service／KWallet。WSLg 提供視窗，不會自動替你準備 keyring；程式會拒絕 Electron 的 `basic_text` 後端，不提供明文備援。Ubuntu 可由使用者在自己的終端安裝：
+WSL 需有 WSLg 或其他可用的顯示服務（`DISPLAY`／Wayland），並安裝 README 所列的 Electron 系統函式庫。Electron 執行檔需另確認已下載；`npm ci` 成功不等於桌面環境已可執行。視窗顯示與 keyring 是不同的前置條件，WSLg 不會自動配置安全儲存。
+
+Linux 保存密碼必須有可用且已解鎖的 Secret Service／KWallet。已有 GNOME／KDE 桌面的使用者應沿用原安全 backend；以下為 Ubuntu 24.04／WSL2＋WSLg 範例。若尚未安裝服務，由使用者在自己的終端**安裝一次**：
 
 ```sh
 sudo apt-get update
 sudo apt-get install gnome-keyring libsecret-1-0 libsecret-tools seahorse
+```
+
+每次重新登入／重啟 WSL 後，確認 App 與 keyring 可存取同一個使用者桌面 D-Bus session，且 keyring 已解鎖。已自動啟動並解鎖時不用重複操作：
+
+```sh
 gnome-keyring-daemon --start --components=secrets
 seahorse
-```
-
-在 Seahorse 建立或解鎖預設密碼 keyring，使用非空的主密碼。WSL 未經桌面 PAM 登入時，keyring 可能不會自動解鎖，需在新工作階段手動解鎖。不要把登入／keyring 密碼提供給 Agent、放入環境變數或寫入專案檔案，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。
-
-```sh
 busctl --user list | grep org.freedesktop.secrets
-npm run check:secure-storage
-# WSL 缺少桌面識別時，可明確測試 libsecret：
-npm run check:secure-storage -- --password-store=gnome-libsecret
 ```
 
-檢查指令啟動真正 Electron，使用隔離的暫存設定檔與固定、非機密的測試字串，不讀取既有憑證。只有安全 backend 可用且加解密往返成功才退出 0；未安裝／未解鎖／逾時則退出 1。不能只以 D-Bus 名稱存在判定可保存密碼。
+在 Seahorse 建立或解鎖預設密碼 keyring，使用**非空的主密碼**。WSL 未經桌面 PAM 登入時可能不會自動解鎖；若無法連上使用者 D-Bus，先修復桌面 session。不要把登入／keyring 密碼提供給 Agent、放入環境變數或寫入專案，也不要以空密碼 keyring 或 `--password-store=basic` 繞過保護。程式拒絕 `basic_text`，沒有明文備援。
 
-若明確指定 libsecret 的檢查通過，但預設檢查仍選到 `basic_text`，正式啟動也需使用同一個 backend：
+### 預設啟動與安全狀態
 
 ```sh
-npm run build
-npm start -- --password-store=gnome-libsecret
-# 開發模式可為該程序提供桌面識別：
-XDG_CURRENT_DESKTOP=GNOME npm run dev
+npm run check:secure-storage
+npm run build      # 初次執行或原始碼變更後
+npm start          # 一般啟動，不需額外 backend 參數
+# 或開發模式：
+npm run dev
+# 已打包的 Linux x64 產物：
+./release/linux-unpacked/database-workspace
+"./release/Database Workspace-0.1.0.AppImage"
 ```
 
-backend 說明以 Electron safeStorage 官方文件為準。切換 backend 前先確保原本儲存憑證的 keyring 仍可存取；不保證不同 backend 能解密既有憑證。
+程式在 Electron ready 前套用共用 backend 選擇策略：明確指定的選擇優先；有可辨識原生桌面識別的 Linux 仍保留 Electron 原生選擇（包含 GNOME／KDE）；只有缺少這類桌面識別且未明確指定的 WSL 預設選 libsecret。Windows／macOS、其他 Linux 的原生策略不變，不需偽造 `XDG_CURRENT_DESKTOP`。選到候選 backend **不代表**服務可用；仍需實際安全儲存檢查。本次 WSL 一般啟動實測為 `backend: gnome_libsecret`、`selectionSource: wsl-libsecret`。
+
+`check:secure-storage` 啟動真正 Electron，使用隔離暫存設定檔與固定、非機密的測試字串，不讀取既有憑證。只有安全 backend 可用且加解密往返成功（`available: true`、`roundtrip: true`）才退出 **0**；不可用、往返失敗或逾時則退出 1。不能只以 D-Bus 名稱存在或安裝成功判定可保存密碼。
+
+Settings 與新增／編輯連線表單提供「安全憑證儲存」狀態，顯示是否可用、backend、選擇來源及「重新檢查」。狀態與檢查錯誤不含密碼；UI 不能精確分辨未安裝、已鎖定或 D-Bus 無法連線。顯示的 Ubuntu 安裝命令**僅供手動執行**，App 不執行 sudo、安裝套件或管理使用者服務。解鎖後按重新檢查；仍不可用或顯示需重新啟動時，重啟 App 再檢查。
+
+安全 backend 不可用時，會拒絕新增／替換密碼並保留既有加密憑證檔案；不阻止 SQLite 或無密碼連線的儲存／使用，已保存密碼能否解密仍取決於原 keyring。正式 IPC 只回傳非機密診斷，不提供讀取密碼的 renderer／MCP 介面。
+
+### 明確指定 backend 僅供排錯
+
+只有確認要使用 GNOME Secret Service 排錯時才使用，不是目前一般 WSL 啟動步驟：
+
+```sh
+npm run check:secure-storage -- --password-store=gnome-libsecret
+# 僅在確認需要相同 backend 後排錯啟動：
+npm start -- --password-store=gnome-libsecret
+```
+
+**不要任意切換既有憑證的 backend。** 先確保原 keyring 仍可存取，規劃遷移／重新輸入；不同 backend 不保證能解密既有憑證，程式不會自動遷移。歷史報告中的強制 backend／桌面識別步驟是當時的環境記錄，不是目前日常啟動需求。
+
+### Linux x64 展開應用與 AppImage
+
+```sh
+npm run package    # 含 build；electron-builder --dir，保留整個 linux-unpacked
+# 使用同一份建置產生 AppImage，不上傳：
+npx electron-builder --linux AppImage --x64 --publish never
+npm run check:linux-artifacts
+# PATH 為位置參數，兩種產物分別完整驗收：
+npm run test:packaged:credentials -- release/linux-unpacked/database-workspace
+npm run test:packaged:credentials -- "release/Database Workspace-0.1.0.AppImage"
+```
+
+本機版本 **0.1.0** 的產物為 `release/linux-unpacked/database-workspace`、`release/Database Workspace-0.1.0.AppImage`，未簽章、未上傳；這些命令不會自動發布或 commit。`check:linux-artifacts` 需要 `unsquashfs`（Ubuntu 的 `squashfs-tools`），核對產品身分、ASAR／資產／SQLite runtime、ELF x64、AppImage runtime／內容與安全 launcher，輸出 `release/linux-artifacts.json`，記錄產物 SHA-256、大小、版本、架構及檢查結果。靜態檢查不代表 GUI 或 keyring 啟動成功，需另執行兩個完整驗收命令。
+
+`build.toolsets.appimage` 固定 **1.0.3**，目前驗證的靜態 runtime 為 **dd6cebe**，**不需安裝主機 `libfuse2`**。這不代表不需 FUSE：原生 AppImage 仍需可存取的 `/dev/fuse` 及 FUSE 掛載能力；Electron 原生 sandbox 需可用的非特權 user namespace，另需 Electron 系統函式庫、顯示服務、可存取的使用者 D-Bus 與已解鎖 keyring。缺少這些條件應修復主機環境，不使用 `--no-sandbox`、`APPIMAGE_EXTRACT_AND_RUN` 或 extract-and-run 備援。
+
+封裝必須保留 `scripts/after-pack.cjs` 安裝的專案安全 AppRun（來源 `scripts/linux-app-run.sh`）；它直接啟動原生 executable，保留 sandbox 與 backend 選擇，不重寫桌面／backend 環境。不要省略 hook 或換回會停用 sandbox 的工具鏈預設 launcher。歷史 FUSE 2 需求紀錄仍保留，但不適用目前這個靜態 runtime 產物。
+
+### 本輪驗收證據與界線
+
+- Linux x64／WSL2＋WSLg：共用 bootstrap、health service、UI、型別檢查與建置通過；展開應用及 AppImage 產製通過，10 項 artifact 檢查與 11 項 packaging 測試通過。
+- 上述兩個 `test:packaged:credentials` 命令皆退出 **0**：真實 `gnome_libsecret`／`wsl-libsecret` 選擇、連線表單透過正式 IPC 保存加密密碼（回傳不含密碼）、同一隔離 profile 重啟後由主程序中真正的 `CredentialService.get` 核對成功，只回報布林結果。
+- 真實子程序不可達 D-Bus 測試為 unavailable；明確 basic 負向測試拒絕新增／替換密碼，既有憑證檔案不變且 SQLite 可用。負向測試只改隔離子程序，不鎖定 keyring 或變更使用者的服務。
+- 一般啟動不帶 debug 參數，確認自身可見視窗後以 `WM_DELETE_WINDOW` 關閉，退出 **0**；另有 24 項原生 launcher 測試及 UI 的 8 種語言／主題／尺寸組合 × 3 種安全狀態。測試的 debug／main probes 僅在隔離驗收程序使用，不新增 production 密碼讀取 IPC。
+- **不是全平台宣稱**：本輪未在 Windows、macOS 或實體 KDE／GNOME 桌面做同等驗收，原生 backend 選擇由策略單元測試保護。既有 Windows 歷史與[先前 macOS arm64 驗收](../report/REPORT-2026-10-03T04-40-41-726Z.md)是獨立紀錄。其他 Linux／架構、正式簽章／公證發布仍待目標環境驗收。143 項真實外部資料庫測試本輪**略過，不是通過**。
 
 WSL 的 renderer 建置可能需要數分鐘，不要僅因短時間沒有新輸出就判定失敗。一般測試可用 `npm test -- --maxWorkers=2` 降低並行負載；不可藉提高逾時、略過測試來掩蓋已重現的錯誤。SQLite 一般查詢現在使用獨立子程序，取消／逾時會終止原生呼叫，等待退出再開新 session，避免舊呼叫持續持有檔案鎖。取消不會撤銷先前已提交的操作，且記憶體資料庫在 session 被終止後會遺失。
 
@@ -83,7 +130,7 @@ npm run test:packaged
 
 啟動整合測試 Redis 後，可用 `node scripts/smoke-packaged.mjs --agent` 驗證發行包的 MCP／Redis／核准與桌面取消流程。
 
-啟動 `release/win-unpacked/Database Workspace.exe`。散布時需保留整個 `win-unpacked` 資料夾。此包未使用發行者憑證簽章；macOS／Linux 的封裝設定已提供，但目前實際驗證的平台是 Windows。
+啟動 `release/win-unpacked/Database Workspace.exe`。散布時需保留整個 `win-unpacked` 資料夾。此 Windows 包未使用發行者憑證簽章；本節保留既有 Windows 驗證紀錄。另有 macOS arm64 歷史紀錄與本輪 Linux x64／WSL 驗收，範圍與限制見上節及 README，不代表本輪重測了 Windows／macOS。
 
 本次 SQL Server 雙驗證方式的已測試新版位於 `release/sqlserver-auth/win-unpacked/Database Workspace.exe`（舊版執行中，因此另存目錄）。原生驅動使用套件附帶的 N-API 預編譯檔，封裝設定停用重編譯並將驅動放在 ASAR 外。
 

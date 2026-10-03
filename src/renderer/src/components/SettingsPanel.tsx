@@ -7,6 +7,7 @@ import { SelectField } from './SelectField';
 import { Input } from './ui/input';
 import { Checkbox } from './ui/checkbox';
 import { useI18n } from '../i18n';
+import { SecureStorageNotice, useSecureStorageStatus } from './SecureStorageNotice';
 import { useRef, useState } from 'react';
 import type { Settings } from '../../../shared/types';
 import { command } from '../api';
@@ -20,6 +21,7 @@ export function SettingsPanel({
   onSaved: () => void;
 }) {
   const t = useI18n();
+  const secureStorage = useSecureStorageStatus();
   const [form, setForm] = useState(initial);
   const initialForm = useRef(JSON.stringify(form));
   const requestClose = async () => {
@@ -125,6 +127,7 @@ export function SettingsPanel({
               {t('Word wrap')}
             </Label>
           </div>
+          <SecureStorageNotice {...secureStorage} />
           <h3>Agent / MCP</h3>
           <div className="form-grid">
             <Label>
