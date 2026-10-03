@@ -5,8 +5,11 @@
   --ui-space-3: 12px;
   --ui-space-4: 16px;
   --ui-space-6: 24px;
-  --ui-font: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
-  --ui-mono: Consolas, 'Cascadia Code', monospace;
+  --ui-font:
+    system-ui, -apple-system, 'Segoe UI', 'PingFang TC', 'Noto Sans CJK TC', 'Microsoft JhengHei',
+    sans-serif;
+  --ui-mono:
+    ui-monospace, 'SF Mono', Menlo, 'Cascadia Code', Consolas, 'DejaVu Sans Mono', monospace;
   --ui-text: 13px;
   --ui-text-small: 12px;
   --ui-line: 20px;

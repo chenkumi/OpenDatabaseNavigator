@@ -119,7 +119,7 @@ describe('real unavailable Secret Service child environment', () => {
         env.GDMSESSION === base.GDMSESSION,
     ).toBe(true);
     expect(env.PASSWORD_STORE === base.PASSWORD_STORE).toBe(true);
-    expect(env.DATABASE_WORKSPACE_DATA_DIR === '/scratch/owned/data').toBe(true);
+    expect(env.DATABASE_WORKSPACE_DATA_DIR === join(resolve('/scratch/owned'), 'data')).toBe(true);
   });
   it('the unavailable option changes ONLY DBUS_SESSION_BUS_ADDRESS relative to a normal launch', () => {
     const root = '/scratch/owned';
@@ -173,7 +173,7 @@ describe('real unavailable Secret Service child environment', () => {
     ).toBe(true);
     expect(
       decodeURIComponent(env.DBUS_SESSION_BUS_ADDRESS.slice('unix:path='.length)) ===
-        join(root, 'unreachable-secret-service.sock'),
+        join(resolve(root), 'unreachable-secret-service.sock'),
     ).toBe(true);
   });
   it('fails closed on platforms where a missing session bus cannot demonstrate native unavailability', () => {

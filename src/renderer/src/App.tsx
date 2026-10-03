@@ -135,7 +135,18 @@ export function App() {
       return next;
     });
   };
-  const refreshWorkspace = () => command<Workspace>('app.get_state').then(setWorkspace);
+  const workspaceRevision = useRef(0);
+  const applyWorkspace = (value: Workspace) => {
+    workspaceRevision.current++;
+    setWorkspace(value);
+  };
+  const refreshWorkspace = () => {
+    const revision = workspaceRevision.current;
+    // A newer event snapshot must not be overwritten by a slower state read.
+    return command<Workspace>('app.get_state').then((value) => {
+      if (revision === workspaceRevision.current) applyWorkspace(value);
+    });
+  };
   useEffect(() => {
     if (workspace.activeConnection) setSelected(workspace.activeConnection);
   }, [workspace.activeConnection]);
@@ -149,7 +160,7 @@ export function App() {
     ]).catch(onError);
     return window.desktop.subscribe((event) => {
       if (['WorkspaceChanged', 'TabCreated', 'TableOpened'].includes(event.type))
-        setWorkspace(event.payload as Workspace);
+        applyWorkspace(event.payload as Workspace);
       if (
         [
           'DatabaseObjectCreated',

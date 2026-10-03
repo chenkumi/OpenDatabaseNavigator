@@ -6,7 +6,7 @@ export function redact(value: unknown, secrets: string[] = []): unknown {
     let text = value
       .replace(/\b(Bearer)\s+[A-Za-z0-9._~+\/-]+/gi, '$1 [REDACTED]')
       .replace(
-        /(password|passwd|token|secret|authorization)\s*([=:])\s*('[^']*'|"[^"]*"|[^\s,;]+)/gi,
+        /(password|passwd|token|secret|authorization)(["']?\s*[=:]\s*)('(?:''|[^'])*'|"(?:""|[^"])*"|[^\s,;]+)/gi,
         '$1$2[REDACTED]',
       );
     text = text
@@ -14,7 +14,10 @@ export function redact(value: unknown, secrets: string[] = []): unknown {
         /\b(IDENTIFIED\s+BY|PASSWORD)\s+((?:E|N)?'(?:''|\\.|[^'\\])*'|"(?:""|\\.|[^"\\])*")/gi,
         '$1 [REDACTED]',
       )
-      .replace(/([a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@]+:)[^\s/@]+(@)/gi, '$1[REDACTED]$2');
+      .replace(
+        /([a-z][a-z0-9+.-]{0,31}:\/\/[^\s/:@]+:)[^\s/]+(@)(?=[^\s/@]*(?:[/?#\s]|$))/gi,
+        '$1[REDACTED]$2',
+      );
     // A one- or two-character password would otherwise rewrite every occurrence of
     // that text in results and logs. Pattern-based redaction above still applies.
     for (const secret of secrets

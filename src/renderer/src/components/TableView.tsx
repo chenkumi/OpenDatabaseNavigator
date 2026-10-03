@@ -105,13 +105,22 @@ export function TableView({
       setSelected([]);
       setRevision((current) => current + 1);
       setExternalChange(false);
-      await command('workspace.update', { id: tab.id, patch: { selectedRows: [] } });
+      // The tab may have been closed while the select was in flight; that is not an error.
+      await command('workspace.update', { id: tab.id, patch: { selectedRows: [] } }).catch(
+        () => undefined,
+      );
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
   };
   useEffect(() => {
-    void command<Column[]>('table.describe', args).then(setColumns).catch(onError);
+    let current = true;
+    void command<Column[]>('table.describe', args)
+      .then((columns) => current && setColumns(columns))
+      .catch((error) => current && onError(error));
+    return () => {
+      current = false;
+    };
   }, [tab.id]);
   useEffect(() => {
     if (!dirty && !busy) void load().catch(onError);

@@ -4,6 +4,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  nativeTheme,
   net,
   protocol,
   safeStorage,
@@ -16,7 +17,10 @@ import { Application, HUMAN } from './application/application';
 import { JsonStore } from './application/services/store';
 import { CredentialService } from './credentials/credential-service';
 import { bootstrapSecureStorage } from './credentials/storage-bootstrap';
-import { SecureStorageService, registerSecureStorageCommands } from './credentials/secure-storage-service';
+import {
+  SecureStorageService,
+  registerSecureStorageCommands,
+} from './credentials/secure-storage-service';
 import { createAdapter } from './database/factory';
 import { McpGateway, validateMcpConfig } from './mcp/server/mcp-server';
 import { DEFAULT_SETTINGS } from '../shared/types';
@@ -74,7 +78,8 @@ async function boot() {
   const data = process.env.DATABASE_WORKSPACE_DATA_DIR || app.getPath('userData');
   const secureStorage = new SecureStorageService(safeStorage, storageSelection);
   const credentials = new CredentialService(
-    new JsonStore(join(data, 'credentials.json'), {}), secureStorage,
+    new JsonStore(join(data, 'credentials.json'), {}),
+    secureStorage,
   );
   core = new Application(
     {
@@ -211,7 +216,7 @@ async function boot() {
       minWidth: 1000,
       minHeight: 650,
       show: false,
-      backgroundColor: '#11151d',
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#11151d' : '#ffffff',
       title: 'Database Workspace',
       webPreferences: {
         preload: join(location, '../preload/index.cjs'),
@@ -296,13 +301,13 @@ async function boot() {
       if (!window.isDestroyed()) window.webContents.send('application:event', event);
   });
   installMenu(core.getSettings().language);
+  app.on('activate', () => {
+    if (!BrowserWindow.getAllWindows().length) createWindow();
+  });
   createWindow();
   await gateway
     .start(core.getSettings().mcp)
     .catch((error) => dialog.showErrorBox('MCP could not start', (error as Error).message));
-  app.on('activate', () => {
-    if (!BrowserWindow.getAllWindows().length) createWindow();
-  });
 }
 app
   .whenReady()

@@ -315,3 +315,27 @@ describe.skipIf(process.env.DB_INTEGRATION !== '1')('server regressions', () => 
     }
   }, 30000);
 });
+
+describe('review follow-up: redaction and PostgreSQL E-strings', () => {
+  it('redacts escaped quotes, JSON keys and URL passwords containing @', async () => {
+    const { redact } = await import('../src/main/security/redact');
+    const text = redact(
+      `WITH PASSWORD = 'ab''cdef'; {"password":"hunter22"} postgres://u:p@ss@h/db`,
+    ) as string;
+    expect(text).not.toMatch(/cdef|hunter22|ss@/);
+    expect(text).toContain('postgres://u:[REDACTED]@h/db');
+  });
+
+  it('keeps backslash-escaped quotes inside PostgreSQL E-strings in one token', async () => {
+    const { sqlTokens } = await import('../src/main/database/object-sql');
+    const tokens = sqlTokens(`DEFAULT E'a\'' , DROP COLUMN x , ADD y '`, 'postgres');
+    expect(tokens.some((token) => token.value === 'DROP')).toBe(false);
+  });
+});
+
+it('does not treat a dollar sign inside a PostgreSQL identifier as a dollar quote', async () => {
+  const { assertSingleStatement } = await import('../src/main/security/single-statement');
+  expect(() => assertSingleStatement('SELECT a$x$ FROM t; DROP TABLE t', 'postgres')).toThrow(
+    /one SQL statement/,
+  );
+});

@@ -7,7 +7,8 @@ export async function aseToolFile(path: string | undefined, names: string[], lab
     throw new Error(`ASE requires an absolute path to ${label}.`);
   if (!(await stat(path).catch(() => undefined))?.isFile())
     throw new Error(`ASE cannot find ${label}.`);
-  if (path.includes(delimiter) || /[\r\n\0]/.test(path))
+  // Only jar files are placed on a class path, where the separator is significant.
+  if ((path.endsWith('.jar') && path.includes(delimiter)) || /[\r\n\0]/.test(path))
     throw new Error(`Invalid ASE tool path for ${label}.`);
   return path;
 }

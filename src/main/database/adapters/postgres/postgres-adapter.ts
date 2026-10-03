@@ -130,12 +130,13 @@ export class PostgresAdapter extends NetworkSqlAdapter {
     // Destroying the socket does not stop a running server statement, which
     // could still commit. Ask the server to cancel it from another session.
     const cancelServerSide = () => {
-      if (processId && !options.readOnly)
+      if (processId)
         void this.pool?.query('SELECT pg_cancel_backend($1)', [processId]).catch(() => undefined);
     };
     try {
       if (options.signal?.aborted) throw new Error('Query cancelled.');
       if (options.readOnly) await client.query('BEGIN READ ONLY');
+      if (options.signal?.aborted) throw new Error('Query cancelled.');
       const bounded = options.readOnly || options.truncate;
       return await new Promise<ReturnType<ResultCollector['finish']>>((resolve, reject) => {
         let settled = false;

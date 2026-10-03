@@ -40,7 +40,7 @@ export function assertSingleStatement(
       throw new Error(
         'Only one SQL statement is permitted per execution. Select a single statement in the editor.',
       );
-    if (char === '$' && engine === 'postgres') {
+    if (char === '$' && engine === 'postgres' && !/[\w$]/.test(sql[i - 1] ?? '')) {
       const tag = /^(\$[a-zA-Z_][a-zA-Z_0-9]*\$|\$\$)/.exec(sql.slice(i))?.[0];
       if (tag) {
         const end = sql.indexOf(tag, i + tag.length);

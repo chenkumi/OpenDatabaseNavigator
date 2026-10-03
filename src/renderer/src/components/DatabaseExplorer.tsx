@@ -5,7 +5,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { DropObjectDialog } from './DropObjectDialog';
 import { RenameObjectDialog } from './RenameObjectDialog';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Connection, TableInfo, DatabaseObject } from '../../../shared/types';
 import { command } from '../api';
 import { useI18n } from '../i18n';
@@ -91,20 +91,23 @@ export function DatabaseExplorer({
       current = false;
     };
   }, [creating, connection.id, connection.engine]);
+  const loadSeq = useRef(0);
   const load = async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError('');
     try {
-      setDatabases(
+      const list =
         connection.engine === 'sqlite'
           ? [connection.database]
-          : await command<string[]>('database.list', { connectionId: connection.id }),
-      );
+          : await command<string[]>('database.list', { connectionId: connection.id });
+      if (seq !== loadSeq.current) return;
+      setDatabases(list);
       setRevision((value) => value + 1);
     } catch (error) {
-      setError((error as Error).message);
+      if (seq === loadSeq.current) setError((error as Error).message);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   };
   useEffect(() => {

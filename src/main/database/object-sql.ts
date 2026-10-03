@@ -63,6 +63,9 @@ export function sqlTokens(
     }
     const start = i,
       char = sql[i];
+    // PostgreSQL E'...' strings treat backslash as an escape, unlike plain strings.
+    const pgEscapeString =
+      engine === 'postgres' && char === "'" && /(?<![\p{L}\p{N}_$])[eE]$/u.test(sql.slice(0, i));
     if (["'", '"', '`', '['].includes(char)) {
       const close = char === '[' ? ']' : char;
       let value = '',
