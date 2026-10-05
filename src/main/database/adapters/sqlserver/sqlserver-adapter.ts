@@ -65,6 +65,7 @@ export class SqlServerAdapter extends NetworkSqlAdapter {
     connection: Connection,
     password?: string,
     private poolSize = 4,
+    private dedicated = false,
   ) {
     super(connection, password);
   }
@@ -171,11 +172,22 @@ export class SqlServerAdapter extends NetworkSqlAdapter {
     if (explain) {
       // SHOWPLAN must be set in its own batch. A private one-connection pool
       // prevents plan mode from leaking to normal queries or other callers.
-      const session = new SqlServerAdapter(this.connection, this.password, 1);
+      const session = new SqlServerAdapter(this.connection, this.password, 1, true);
       try {
         await session.connect();
         await new session.driver.Request(session.pool!).query('SET SHOWPLAN_XML ON');
         return await session.query(sql.slice(explain[0].length), params, options);
+      } finally {
+        await session.disconnect();
+      }
+    }
+    // The shared pool never resets a connection, so USE, SET or an open
+    // transaction from a user statement would leak into later pooled queries.
+    // Anything that is not a verified read runs on its own throwaway connection.
+    if (!options.readOnly && !this.dedicated) {
+      const session = new SqlServerAdapter(this.connection, this.password, 1, true);
+      try {
+        return await session.query(sql, params, options);
       } finally {
         await session.disconnect();
       }

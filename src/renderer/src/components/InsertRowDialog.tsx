@@ -97,7 +97,7 @@ export function InsertRowDialog({
             variant="ghost"
             type="button"
             disabled={busy}
-            onClick={onClose}
+            onClick={() => void requestClose()}
             aria-label={t('Close')}
           >
             ×
@@ -217,7 +217,12 @@ export function InsertRowDialog({
           )}
         </div>
         <footer>
-          <Button variant="outline" type="button" disabled={busy} onClick={onClose}>
+          <Button
+            variant="outline"
+            type="button"
+            disabled={busy}
+            onClick={() => void requestClose()}
+          >
             {t('Cancel')}
           </Button>
           <Button type="submit" variant="default" className="primary" disabled={busy}>

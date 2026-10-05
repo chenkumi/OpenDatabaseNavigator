@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { assertEngineCommand } from '../../../shared/engine-capabilities';
 import { z } from 'zod';
 import type { Actor, CommandResult, Connection, Risk } from '../../../shared/types';
 import { PermissionService } from '../../mcp/permissions/permission-service';
@@ -14,6 +15,7 @@ export interface CommandDefinition {
   auditArguments?: (args: any) => Record<string, unknown>;
   execute: (args: any, actor: Actor) => Promise<unknown> | unknown;
 }
+const viewStateCommands = new Set(['workspace.update', 'workspace.activate', 'workspace.reorder']);
 export class CommandBus {
   private definitions = new Map<string, CommandDefinition>();
   constructor(
@@ -88,6 +90,7 @@ export class CommandBus {
       auditArgs = definition.auditArguments?.(args) ?? args;
       connection =
         typeof args.connectionId === 'string' ? this.connection(args.connectionId) : undefined;
+      assertEngineCommand(connection?.engine, name);
       const risk = typeof definition.risk === 'function' ? definition.risk(args) : definition.risk;
       const decision = this.permissions.evaluate(actor, connection, risk);
       const additionalRisks = definition.additionalRisks
@@ -122,7 +125,9 @@ export class CommandBus {
       this.events.emit('CommandStarted', { command: name, actor, connectionId: connection?.id });
       executed = [];
       const data = await executedSql.run(executed, () => definition.execute(args, actor));
-      if (name !== 'audit.list')
+      // Tab view state changes on every keystroke; auditing them rewrites the whole
+      // audit file each time and pushes real operations out of its size cap.
+      if (name !== 'audit.list' && !(actor.kind === 'human' && viewStateCommands.has(name)))
         this.record({
           actor,
           command: name,

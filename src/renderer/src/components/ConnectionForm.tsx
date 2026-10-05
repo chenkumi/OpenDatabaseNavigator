@@ -205,7 +205,7 @@ export function ConnectionForm({
             type="button"
             disabled={busy}
             aria-label={t('Close')}
-            onClick={onClose}
+            onClick={() => void requestClose()}
           >
             ✕
           </Button>
@@ -244,7 +244,7 @@ export function ConnectionForm({
               >
                 {['sqlite', 'mysql', 'postgres', 'sqlserver', 'redis', 'sybase'].map((type) => (
                   <option key={type} value={type}>
-                    {type === 'sybase' ? t('SAP / Sybase ASE (experimental)') : type}
+                    {type === 'sybase' ? t('SAP / Sybase ASE (read-only, experimental)') : type}
                   </option>
                 ))}
               </SelectField>
@@ -333,7 +333,7 @@ export function ConnectionForm({
                   <>
                     <p className="muted wide">
                       {t(
-                        'ASE 16.x support awaits real-server validation. Use SAP ASE ODBC, or choose a JDBC character set below and configure jConnect. SQL Anywhere and IQ are not supported.',
+                        'Sybase is read-only. ASE 11.x is the current test target; ASE 16.x remains unverified. Writes, DDL, SQL file execution and native SQL export are disabled. SQL Anywhere and IQ are not supported.',
                       )}
                     </p>
                     {!form.charset && (
@@ -492,7 +492,9 @@ export function ConnectionForm({
                       }
                       onValueChange={(value) => patch('charset', value === 'odbc' ? '' : value)}
                     >
-                      {form.engine === 'sybase' && <option value="odbc">UTF-8 (ODBC)</option>}
+                      {form.engine === 'sybase' && (
+                        <option value="odbc">{t('ODBC (server default)')}</option>
+                      )}
                       {(form.engine === 'sybase'
                         ? ASE_ENCODINGS
                         : form.engine === 'postgres'
@@ -507,7 +509,7 @@ export function ConnectionForm({
                     <small>
                       {t(
                         form.engine === 'sybase'
-                          ? 'JDBC encodings require JDK 11+ and SAP jconn4.jar. SQL and parameters must be representable in the selected encoding. Reconnect after changing this setting; SQL exports remain UTF-8. Experimental until verified with your ASE server.'
+                          ? 'ODBC uses the server default character set. JDBC requires JDK 11+ and SAP jconn4.jar. Encoding compatibility must be verified with your server; reconnect after changing this setting. Sybase remains read-only.'
                           : form.engine === 'postgres'
                             ? 'Sets PostgreSQL protocol text encoding for SQL, parameters and results. Unrepresentable text is rejected. Change this setting and reconnect instead of using SET client_encoding. SQL export files remain UTF-8.'
                             : 'Encodes Redis text keys and values. JSON documents stay UTF-8. Unrepresentable characters are rejected; existing bytes are not converted.',

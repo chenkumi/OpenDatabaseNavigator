@@ -95,6 +95,7 @@ async function boot() {
   registerSecureStorageCommands(core.commands, secureStorage);
   // Tabs do not survive a restart; this also clears what an abnormal exit left behind.
   core.workspace.reset();
+  core.workspace.debounced = true;
   gateway = new McpGateway(core, credentials);
   core.commands.register('clipboard.result.copy', {
     schema: z.object({ content: z.string().max(16 * 1024 * 1024) }).strict(),
@@ -181,15 +182,22 @@ async function boot() {
     description: 'Reveal local access token to desktop user',
     execute: () => ({ token: gateway.token() }),
   });
+  let settingsQueue: Promise<unknown> = Promise.resolve();
   core.commands.register('mcp.rotate_token', {
     schema: z.object({}).strict(),
     humanOnly: true,
     risk: 'workspace',
     description: 'Revoke the previous token and all agent sessions',
     execute: async () => {
-      const token = await gateway.rotateToken();
-      await gateway.start(core.getSettings().mcp);
-      return { token };
+      // Share the settings queue so a rotation can never interleave with a
+      // settings-driven gateway restart and leave an orphaned listener behind.
+      const run = settingsQueue.then(async () => {
+        const token = await gateway.rotateToken();
+        await gateway.start(core.getSettings().mcp);
+        return token;
+      });
+      settingsQueue = run.catch(() => undefined);
+      return { token: await run };
     },
   });
   const rendererRoot = resolve(location, '../renderer');
@@ -249,7 +257,6 @@ async function boot() {
       (url === `${expected}/index.html` || url === `${expected}/`)
     );
   };
-  let settingsQueue: Promise<unknown> = Promise.resolve();
   ipcMain.handle('application:command', async (event, name, args) => {
     if (!validSender(event) || typeof name !== 'string')
       return { success: false, error: 'Untrusted IPC sender.' };
@@ -325,6 +332,7 @@ app.on('before-quit', (event) => {
   if (!allowDiscard()) return;
   quitting = true;
   core?.workspace.reset();
+  core?.workspace.flush();
   core?.scripts.cancelAll();
   Promise.all([gateway?.stop(), core?.connections.shutdown(), core?.exports.shutdown()]).finally(
     () => app.quit(),

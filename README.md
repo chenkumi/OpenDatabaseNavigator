@@ -8,7 +8,7 @@
 
 ## 特色
 
-- **多種資料庫**：SQLite、PostgreSQL、MySQL／MariaDB、SQL Server（SQL 帳密，Windows 上另支援 Windows 驗證）、Redis；SAP／Sybase ASE 為實驗性支援（尚未在真實 ASE 驗證）。
+- **多種資料庫**：SQLite、PostgreSQL、MySQL／MariaDB、SQL Server（SQL 帳密，Windows 上另支援 Windows 驗證）、Redis；SAP／Sybase ASE 僅提供實驗性唯讀功能（已在 ASE 11.5.1.2 驗證基本連線／查詢；16.x 尚未真機驗證）。
 - **查詢與資料**：Monaco SQL 編輯器與欄位／資料表補全、虛擬化的大型結果表、行內編輯、最多 30 個 AND 篩選、CSV／JSON 匯出、執行 SQL 檔案、匯出 SQL 備份。
 - **結構設計**：資料表／檢視設計器、索引、觸發器、外鍵與 CHECK、產生欄位；建立、重新命名、刪除前都會預覽 SQL，並檢查物件版本。
 - **Redis**：字串、Hash、List、Set、Sorted Set、Stream 與 JSON 的瀏覽與編輯，保留 TTL。
@@ -68,7 +68,7 @@ node -e "require('msnodesqlv8'); console.log('Native ODBC bridge loaded')"
 - 真實資料庫整合測試：Docker Desktop／Docker Engine 必須已啟動；Apple Silicon 上 SQL Server 測試映像可能另受 amd64 模擬相容性限制。
 - PostgreSQL SQL 匯出：安裝相容伺服器版本的 `pg_dump`（macOS 可用 Homebrew `libpq`，需加入 PATH 或在連線設定指定絕對路徑）。
 - SQL Server SQL 匯出：PowerShell 與可載入的 `SqlServer` 模組；非 Windows 需 `pwsh`。
-- ASE JDBC／匯出：JDK 11+、合法取得的 SAP `jconn4.jar`；原生結構匯出另需 `DDLGen.jar`。ASE 仍為實驗性支援，真機未驗收。
+- ASE JDBC 唯讀查詢：JDK 11+、合法取得的 SAP `jconn4.jar`；JDBC 真機尚未驗證。ASE 寫入、DDL、SQL 檔案執行及原生 SQL 匯出均停用，詳見 [ASE 唯讀支援](docs/engines/sybase-support.md)。
 
 ### Linux／WSL 安全儲存與啟動設定
 

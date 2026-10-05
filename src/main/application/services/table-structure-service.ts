@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { SYBASE_READ_ONLY_REASON } from '../../../shared/engine-capabilities';
 import type {
   Connection,
   StructureChange,
@@ -38,6 +39,8 @@ interface Details extends TableStructure {
 }
 const options = { limit: 5000, timeout: 30000, readOnly: true };
 const literal = (s: string) => "'" + s.replaceAll("'", "''") + "'";
+// N'' keeps non-ASCII names intact on SQL Server databases with a non-Unicode collation.
+const nliteral = (s: string) => 'N' + literal(s);
 export async function describeStructure(
   adapter: SqlAdapter,
   connection: Connection,
@@ -255,6 +258,11 @@ export async function describeStructure(
     result.definition = renameDefinition(result.definition, engine, 'view', target);
   if (table.kind === 'view' && !result.definition)
     result.readOnlyReason = 'The database did not return a complete view definition.';
+  if (engine === 'sybase') {
+    result.readOnlyReason = SYBASE_READ_ONLY_REASON;
+    result.version = createHash('sha256').update(JSON.stringify(result)).digest('hex');
+    return result;
+  }
   if (table.kind === 'table') Object.assign(result, await readTableConstraints(adapter, result));
   if (table.kind === 'table') await readPropertyMetadata(adapter, result);
   if (table.kind === 'table') await readGenerationMetadata(adapter, result);
@@ -549,7 +557,7 @@ export function planStructure(detail: Details, change: StructureChange): Structu
       engine === 'sybase'
         ? `EXEC sp_rename ${literal(`${target}.${q(change.column)}`)}, ${literal(change.name)}, 'column'`
         : engine === 'sqlserver'
-          ? `EXEC sys.sp_rename ${literal(`${target}.${q(change.column)}`)}, ${literal(change.name)}, 'COLUMN'`
+          ? `EXEC sys.sp_rename ${nliteral(`${target}.${q(change.column)}`)}, ${nliteral(change.name)}, 'COLUMN'`
           : `ALTER TABLE ${target} RENAME COLUMN ${q(change.column)} TO ${q(change.name)}`,
     ];
     return plan;

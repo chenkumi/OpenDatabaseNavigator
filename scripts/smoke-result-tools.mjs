@@ -65,9 +65,18 @@ try {
   await page.getByRole('button', { name: '▤ items', exact: true }).dblclick();
   await expect(active().getByLabel('name row 1', { exact: true })).toHaveValue('alpha');
   const tableTabId = (await call('app.get_state')).activeTab;
+  console.log('Checking collapsible right-side filters and draft preservation...');
+  const filterToggle = () => active().getByRole('button', { name: 'Filters', exact: true });
+  await expect(active().locator('.table-filter-panel')).toBeHidden();
+  await filterToggle().click();
+  await expect(filterToggle()).toHaveAttribute('aria-expanded', 'true');
 
   await selectValue(page, active().getByLabel('Filter column', { exact: true }), 'name');
   await active().getByLabel('Filter value', { exact: true }).fill('alpha');
+  await filterToggle().click();
+  await expect(active().locator('.table-filter-panel')).toBeHidden();
+  await filterToggle().click();
+  await expect(active().getByLabel('Filter value', { exact: true })).toHaveValue('alpha');
   await active().getByRole('button', { name: 'Apply', exact: true }).click();
   await expect(active().getByLabel('id row 2', { exact: true })).toHaveValue('3');
   await active().getByRole('button', { name: 'Add condition', exact: true }).click();
@@ -78,6 +87,10 @@ try {
   await expect(active().getByLabel('id row 1', { exact: true })).toHaveValue('3');
   await expect(active().getByLabel('id row 2', { exact: true })).toHaveValue('4');
   await expect(active().getByRole('button', { name: 'Next →', exact: true })).toBeDisabled();
+  await active().getByRole('button', { name: 'Close filters', exact: true }).click();
+  await expect(filterToggle()).toHaveText('Filters (2)');
+  await expect(active().getByLabel('id row 1', { exact: true })).toHaveValue('3');
+  await filterToggle().click();
   await active().getByRole('button', { name: 'Add condition', exact: true }).click();
   await selectValue(page, active().getByLabel('Filter column 3', { exact: true }), 'note');
   await selectValue(page, active().getByLabel('Filter operator 3', { exact: true }), 'IS NULL');
@@ -90,6 +103,25 @@ try {
   await active().getByRole('button', { name: 'Clear filter', exact: true }).click();
   await expect(active().getByLabel('id row 1', { exact: true })).toHaveValue('1');
 
+  console.log('Checking long filter lists and sticky actions...');
+  await active().getByLabel('Filter value', { exact: true }).fill('draft');
+  for (let count = 1; count < 30; count++)
+    await active().getByRole('button', { name: 'Add condition', exact: true }).click();
+  await expect(active().getByRole('button', { name: 'Add condition', exact: true })).toBeDisabled();
+  await active().getByLabel('Filter value 30', { exact: true }).scrollIntoViewIfNeeded();
+  await expect(
+    active().getByRole('button', { name: 'Clear filter', exact: true }),
+  ).toBeInViewport();
+  await active().getByRole('button', { name: 'Clear filter', exact: true }).click();
+  await expect(active().locator('.filter-row')).toHaveCount(1);
+  await expect(active().locator('.table-operation')).toHaveAttribute('aria-busy', 'false');
+  // Escape closes the panel and returns focus to its toggle.
+  await active().getByLabel('Filter value', { exact: true }).focus();
+  await page.keyboard.press('Escape');
+  await expect(filterToggle()).toBeFocused();
+  await expect(active().locator('.table-filter-panel')).toBeHidden();
+  await filterToggle().click();
+  console.log('Checking result tools and edit protection...');
   // Inspect JSON from a horizontally scrolled column and preserve numeric literals.
   await active().getByLabel('View payload row 1', { exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -198,6 +230,7 @@ try {
         [1280, 720],
         [1920, 1080],
       ]) {
+        console.log(`Checking filters ${language}/${theme}/${size[0]}x${size[1]}...`);
         await call('workspace.activate', { id: tab.id });
         await call('settings.save', { ...(await call('settings.get')), language, theme });
         await desktop.evaluate(
@@ -244,9 +277,26 @@ try {
         );
         await call('workspace.activate', { id: tableTabId });
         await expect(active().getByLabel('id row 1', { exact: true })).toHaveValue('3');
+        const filterLabel = language === 'en' ? 'Filters' : '過濾';
+        const refreshLabel = language === 'en' ? 'Refresh' : '重新整理';
+        const toggleRect = await active()
+          .getByRole('button', { name: filterLabel, exact: true })
+          .boundingBox();
+        const refreshRect = await active()
+          .getByRole('button', { name: refreshLabel, exact: true })
+          .boundingBox();
+        assert.ok(
+          toggleRect.x >= refreshRect.x + refreshRect.width &&
+            Math.abs(toggleRect.y - refreshRect.y) < 1,
+        );
+        const panel = active().locator('.table-filter-panel');
+        await expect(panel).toBeVisible();
+        assert.equal(await panel.evaluate((node) => node.offsetWidth), 320);
         const metrics = await active().evaluate((node) => {
           const controls = [
-            ...node.querySelectorAll('.table-filters button, .column-controls button'),
+            ...node.querySelectorAll(
+              '.table-filters > .toolbar button, .column-controls button, .table-filter-panel > .toolbar button',
+            ),
           ].filter((button) => button.getBoundingClientRect().width > 0);
           return {
             overflow: document.documentElement.scrollWidth > innerWidth,
@@ -280,6 +330,34 @@ try {
           resolve(`.local/result-tools/filters-${language}-${theme}-${size[0]}.png`),
         );
       }
+  console.log('Checking narrow workspace filter overlay...');
+  await call('settings.save', { ...(await call('settings.get')), language: 'en' });
+  await desktop.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0].setSize(1000, 720),
+  );
+  await expect(filterToggle()).toBeVisible();
+  const narrow = await active().evaluate((node) => {
+    const panel = node.querySelector('.table-filter-panel');
+    const rect = panel.getBoundingClientRect();
+    const data = node.querySelector('.table-data-layout').getBoundingClientRect();
+    return {
+      position: getComputedStyle(panel).position,
+      right: rect.right,
+      dataRight: data.right,
+      left: rect.left,
+      dataLeft: data.left,
+      overflow: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+  assert.equal(narrow.position, 'absolute');
+  assert.ok(
+    narrow.left >= narrow.dataLeft &&
+      Math.abs(narrow.right - narrow.dataRight) < 1 &&
+      !narrow.overflow,
+  );
+  await filterToggle().click();
+  await expect(active().locator('.table-filter-panel')).toBeHidden();
+  await expect(active().getByLabel('id row 1', { exact: true })).toHaveValue('3');
   assert.deepEqual(errors, []);
   const port = randomInt(30000, 50000);
   const settings = await call('settings.get');
@@ -312,6 +390,8 @@ try {
     JSON.stringify({
       success: true,
       verified: [
+        'right-side collapsible filters, draft preservation, applied count and Escape focus',
+        '30-condition scrolling with reachable footer actions and narrow workspace overlay',
         'AND filters and individual removal',
         'NULL and empty results',
         'draft protection',

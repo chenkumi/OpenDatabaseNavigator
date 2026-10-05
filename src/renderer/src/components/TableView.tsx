@@ -7,18 +7,21 @@ import { TableFilters } from './TableFilters';
 import { InsertRowDialog } from './InsertRowDialog';
 import { StructureEditor } from './StructureEditor';
 import { useI18n } from '../i18n';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ListFilter, LoaderCircle, X } from 'lucide-react';
 import type { Column, Filter, QueryResult, Settings, WorkspaceTab } from '../../../shared/types';
 import { command } from '../api';
 import { ResultGrid } from './ResultGrid';
 export function TableView({
   tab,
   settings,
+  readOnly = false,
   onError,
   viewRequest,
 }: {
   tab: WorkspaceTab;
   settings: Settings;
+  readOnly?: boolean;
   onError: (error: unknown) => void;
   viewRequest?: { structure: boolean; revision: number };
 }) {
@@ -29,6 +32,9 @@ export function TableView({
   const [offset, setOffset] = useState(0);
   const [sort, setSort] = useState<{ column: string; direction: 'asc' | 'desc' }[]>([]);
   const [applied, setApplied] = useState<Filter[]>([]);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterPanelId = useId();
+  const filterToggle = useRef<HTMLButtonElement>(null);
   const [edits, setEdits] = useState<Record<number, Record<string, unknown>>>({});
   const [selected, setSelected] = useState<number[]>([]);
   const [insert, setInsert] = useState(false);
@@ -113,13 +119,17 @@ export function TableView({
       if (sequence === loadSequence.current) setLoading(false);
     }
   };
+  const describeSequence = useRef(0);
+  const describe = () => {
+    const sequence = ++describeSequence.current;
+    return command<Column[]>('table.describe', args)
+      .then((columns) => sequence === describeSequence.current && setColumns(columns))
+      .catch((error) => sequence === describeSequence.current && onError(error));
+  };
   useEffect(() => {
-    let current = true;
-    void command<Column[]>('table.describe', args)
-      .then((columns) => current && setColumns(columns))
-      .catch((error) => current && onError(error));
+    void describe();
     return () => {
-      current = false;
+      describeSequence.current++;
     };
   }, [tab.id]);
   useEffect(() => {
@@ -128,7 +138,8 @@ export function TableView({
   useEffect(
     () =>
       window.desktop.subscribe((event) => {
-        if (!['RowInserted', 'RowUpdated', 'RowDeleted'].includes(event.type)) return;
+        const structure = event.type === 'TableStructureChanged';
+        if (!structure && !['RowInserted', 'RowUpdated', 'RowDeleted'].includes(event.type)) return;
         const changed = event.payload as {
           connectionId: string;
           database?: string;
@@ -142,6 +153,8 @@ export function TableView({
           (changed.schema && changed.schema !== tab.schema)
         )
           return;
+        // Columns and the primary key may have changed; row predicates depend on them.
+        if (structure) void describe();
         if (busy) return;
         if (dirty) setExternalChange(true);
         else void load().catch(onError);
@@ -169,7 +182,7 @@ export function TableView({
     }));
   };
   const save = async () => {
-    if (busy) return;
+    if (busy || readOnly) return;
     setBusy(true);
     const remaining = { ...edits };
     try {
@@ -218,6 +231,12 @@ export function TableView({
       className="table-view"
       ref={container}
     >
+      {!structure && loading && (
+        <Alert role="status" aria-live="polite" className="table-loading-status shrink-0">
+          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
+          <span>{t('Loading data…')}</span>
+        </Alert>
+      )}
       <Fieldset className="table-operation" disabled={busy || loading} aria-busy={busy || loading}>
         {externalChange && (
           <Alert role="status" className="notice">
@@ -256,6 +275,20 @@ export function TableView({
           >
             {t('Refresh')}
           </Button>
+          <Button
+            ref={filterToggle}
+            size="default"
+            variant="outline"
+            hidden={structure}
+            aria-label={t('Filters')}
+            aria-expanded={filtersOpen}
+            aria-controls={filterPanelId}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <ListFilter />
+            {t('Filters')}
+            {applied.length > 0 && ` (${applied.length})`}
+          </Button>
         </div>
         {structure ? (
           <TabsContent value="structure" className="table-mode">
@@ -273,137 +306,173 @@ export function TableView({
           </TabsContent>
         ) : (
           <TabsContent value="data" className="table-mode">
-            <TableFilters
-              key={columns.map((column) => column.name).join('|')}
-              columns={columns}
-              applied={applied}
-              disabled={dirty}
-              onApply={(filters) => {
-                setApplied(filters);
-                setOffset(0);
-              }}
-            />
-            <div className="toolbar">
-              <span className="spacer" />
-              <Button
-                variant="outline"
-                disabled={dirty || !columns.length}
-                onClick={() => setInsert(true)}
-              >
-                {t('+ Row')}
-              </Button>
-              <Button
-                variant="outline"
-                disabled={!selected.length || dirty}
-                onClick={async () => {
-                  if (
-                    await confirmAction(
-                      t('Delete {count} selected rows?', { count: selected.length }),
-                    )
-                  )
-                    void (async () => {
-                      setBusy(true);
-                      try {
-                        for (const index of selected)
-                          await command('data.delete', {
-                            ...args,
-                            filters: predicate(result!.rows[index]),
-                          });
-                        await load();
-                      } finally {
-                        setBusy(false);
-                      }
-                    })().catch(onError);
-                }}
-              >
-                {t('Delete')}
-              </Button>
-            </div>
-
-            {result && !columns.some((column) => column.primaryKey) && (
-              <Alert role="status" className="notice">
-                {t('Row editing requires a primary key.')}
-              </Alert>
-            )}
-            {result && (
-              <ResultGrid
-                sort={sort[0]}
-                editedCells={edits}
-                columnMetadata={columns}
-                key={`${revision}-${offset}-${JSON.stringify(applied)}-${JSON.stringify(sort)}`}
-                result={shownResult!}
-                onEdit={
-                  columns.some((column) => column.primaryKey)
-                    ? (row, column, value) => {
-                        originalRows.current[row] ??= { ...result.rows[row] };
-                        const next = { ...edits, [row]: { ...edits[row], [column]: value } };
-                        if (Object.is(value, result.rows[row][column])) delete next[row][column];
-                        if (!Object.keys(next[row]).length) delete next[row];
-                        mark(next);
-                      }
-                    : undefined
-                }
-                onSelect={(rows) => {
-                  setSelected(rows);
-                  void command('workspace.update', {
-                    id: tab.id,
-                    patch: { selectedRows: rows.map((index) => result.rows[index]) },
-                  }).catch(onError);
-                }}
-                onSort={(column) => {
-                  if (!dirty)
-                    setSort([
-                      {
-                        column,
-                        direction:
-                          sort[0]?.column === column && sort[0].direction === 'asc'
-                            ? 'desc'
-                            : 'asc',
-                      },
-                    ]);
-                }}
-              />
-            )}
-            <div className="toolbar bottom">
-              <Button
-                variant="outline"
-                disabled={dirty || !offset}
-                onClick={() => setOffset(Math.max(0, offset - settings.pageSize))}
-              >
-                {t('← Previous')}
-              </Button>
-              <span>
-                {t('Page {page} · {count} rows / page', {
-                  page: Math.floor(offset / settings.pageSize) + 1,
-                  count: settings.pageSize,
-                })}
-              </span>
-              <Button
-                variant="outline"
-                disabled={dirty || !result?.hasMore}
-                onClick={() => setOffset(offset + settings.pageSize)}
-              >
-                {t('Next →')}
-              </Button>
-              <span className="spacer" />
-              {dirty && (
-                <>
-                  <span className="dirty">
-                    {t('Unsaved changes')} ·{' '}
-                    {t('{count} modified rows', { count: Object.keys(edits).length })}
-                  </span>
-                  <Button variant="outline" onClick={() => mark({})}>
-                    {t('Revert')}
+            <div className="table-data-layout">
+              <div className="table-data-main">
+                <div className="toolbar">
+                  <span className="spacer" />
+                  <Button
+                    variant="outline"
+                    disabled={readOnly || dirty || !columns.length}
+                    onClick={() => setInsert(true)}
+                  >
+                    {t('+ Row')}
                   </Button>
                   <Button
-                    variant="default"
-                    className="primary"
-                    onClick={() => void save().catch(onError)}
+                    variant="outline"
+                    disabled={readOnly || !selected.length || dirty}
+                    onClick={async () => {
+                      if (
+                        await confirmAction(
+                          t('Delete {count} selected rows?', { count: selected.length }),
+                        )
+                      )
+                        void (async () => {
+                          setBusy(true);
+                          try {
+                            for (const index of selected)
+                              await command('data.delete', {
+                                ...args,
+                                filters: predicate(result!.rows[index]),
+                              });
+                            await load();
+                          } finally {
+                            setBusy(false);
+                          }
+                        })().catch(onError);
+                    }}
                   >
-                    {t('Save changes')}
+                    {t('Delete')}
                   </Button>
-                </>
-              )}
+                </div>
+
+                {!readOnly && result && !columns.some((column) => column.primaryKey) && (
+                  <Alert role="status" className="notice">
+                    {t('Row editing requires a primary key.')}
+                  </Alert>
+                )}
+                {result && (
+                  <ResultGrid
+                    sort={sort[0]}
+                    editedCells={edits}
+                    columnMetadata={columns}
+                    key={`${revision}-${offset}-${JSON.stringify(applied)}-${JSON.stringify(sort)}`}
+                    result={shownResult!}
+                    onEdit={
+                      !readOnly && columns.some((column) => column.primaryKey)
+                        ? (row, column, value) => {
+                            originalRows.current[row] ??= { ...result.rows[row] };
+                            const next = { ...edits, [row]: { ...edits[row], [column]: value } };
+                            if (Object.is(value, result.rows[row][column]))
+                              delete next[row][column];
+                            if (!Object.keys(next[row]).length) delete next[row];
+                            mark(next);
+                          }
+                        : undefined
+                    }
+                    onSelect={(rows) => {
+                      setSelected(rows);
+                      void command('workspace.update', {
+                        id: tab.id,
+                        patch: { selectedRows: rows.map((index) => result.rows[index]) },
+                      }).catch(onError);
+                    }}
+                    onSort={(column) => {
+                      if (!dirty) {
+                        setOffset(0);
+                        setSort([
+                          {
+                            column,
+                            direction:
+                              sort[0]?.column === column && sort[0].direction === 'asc'
+                                ? 'desc'
+                                : 'asc',
+                          },
+                        ]);
+                      }
+                    }}
+                  />
+                )}
+                <div className="toolbar bottom">
+                  <Button
+                    variant="outline"
+                    disabled={dirty || !offset}
+                    onClick={() => setOffset(Math.max(0, offset - settings.pageSize))}
+                  >
+                    {t('← Previous')}
+                  </Button>
+                  <span>
+                    {t('Page {page} · {count} rows / page', {
+                      page: Math.floor(offset / settings.pageSize) + 1,
+                      count: settings.pageSize,
+                    })}
+                  </span>
+                  <Button
+                    variant="outline"
+                    disabled={dirty || !result?.hasMore}
+                    onClick={() => setOffset(offset + settings.pageSize)}
+                  >
+                    {t('Next →')}
+                  </Button>
+                  <span className="spacer" />
+                  {dirty && (
+                    <>
+                      <span className="dirty">
+                        {t('Unsaved changes')} ·{' '}
+                        {t('{count} modified rows', { count: Object.keys(edits).length })}
+                      </span>
+                      <Button variant="outline" onClick={() => mark({})}>
+                        {t('Revert')}
+                      </Button>
+                      <Button
+                        variant="default"
+                        className="primary"
+                        onClick={() => void save().catch(onError)}
+                      >
+                        {t('Save changes')}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <aside
+                id={filterPanelId}
+                className="table-filter-panel"
+                hidden={!filtersOpen}
+                aria-label={t('Filters')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && !event.defaultPrevented) {
+                    event.preventDefault();
+                    setFiltersOpen(false);
+                    filterToggle.current?.focus();
+                  }
+                }}
+              >
+                <div className="toolbar">
+                  <strong>{t('Filters')}</strong>
+                  <span className="spacer" />
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t('Close filters')}
+                    onClick={() => {
+                      setFiltersOpen(false);
+                      filterToggle.current?.focus();
+                    }}
+                  >
+                    <X />
+                  </Button>
+                </div>
+                <TableFilters
+                  key={columns.map((column) => column.name).join('|')}
+                  columns={columns}
+                  applied={applied}
+                  disabled={dirty}
+                  onApply={(filters) => {
+                    setApplied(filters);
+                    setOffset(0);
+                  }}
+                />
+              </aside>
             </div>
           </TabsContent>
         )}

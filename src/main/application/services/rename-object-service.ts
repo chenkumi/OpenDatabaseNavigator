@@ -11,6 +11,7 @@ import { listDatabaseObjects } from './database-metadata';
 
 const options = { limit: 5000, timeout: 30000, readOnly: true };
 const literal = (name: string) => "'" + name.replaceAll("'", "''") + "'";
+const nliteral = (name: string) => 'N' + literal(name);
 export async function planRenameObject(
   adapter: SqlAdapter,
   connection: Connection,
@@ -72,7 +73,7 @@ export async function planRenameObject(
     ];
   } else if (engine === 'sqlserver' || engine === 'sybase') {
     statements = [
-      `EXEC ${engine === 'sqlserver' ? 'sys.' : ''}sp_rename ${literal(input.kind === 'index' ? `${table}.${q(input.objectName)}` : old)}, ${literal(input.newName)}${engine === 'sqlserver' ? `, '${input.kind === 'index' ? 'INDEX' : 'OBJECT'}'` : input.kind === 'index' ? ", 'index'" : ''}`,
+      `EXEC ${engine === 'sqlserver' ? 'sys.' : ''}sp_rename ${(engine === 'sqlserver' ? nliteral : literal)(input.kind === 'index' ? `${table}.${q(input.objectName)}` : old)}, ${(engine === 'sqlserver' ? nliteral : literal)(input.newName)}${engine === 'sqlserver' ? `, '${input.kind === 'index' ? 'INDEX' : 'OBJECT'}'` : input.kind === 'index' ? ", 'index'" : ''}`,
     ];
   } else if (engine === 'mysql') {
     if (input.kind === 'table' || input.kind === 'view') {

@@ -226,7 +226,7 @@ describe.skipIf(!javaHome || compiler?.status !== 0)(
       }
     });
     it.each([false, true])(
-      'exports data=%s through the Command Bus and preserves permissions and SQL-file preview',
+      'rejects native SQL export data=%s for GUI and MCP before starting a worker',
       async (includeData) => {
         const app = new Application(
           {
@@ -265,26 +265,11 @@ describe.skipIf(!javaHome || compiler?.status !== 0)(
             name: 'test',
           });
           expect(denied.success).toBe(false);
-          expect(JSON.stringify(app.audit.list()[0])).toContain('Agent access is disabled');
-          await app.connections.connect(connection.id);
+          expect(JSON.stringify(app.audit.list()[0])).toContain('read-only');
           const started = await app.commands.dispatch('export.start', request, HUMAN);
-          expect(started.success, started.error).toBe(true);
-          await expect
-            .poll(() => app.exports.status(request.id, HUMAN).state, { timeout: 10000 })
-            .toBe('completed');
-          const file = join(directory, 'saved.sql');
-          await app.exports.save(request.id, file, HUMAN);
-          const sql = await readFile(file, 'utf8');
-          expect(sql).toContain('create database [rental_test]');
-          expect(sql.includes('INSERT INTO')).toBe(includeData);
-          const preview = await app.scripts.preview({
-            connectionId: connection.id,
-            database: connection.database,
-            sql,
-            fileName: 'saved.sql',
-          });
-          expect(preview.total).toBeGreaterThan(2);
-          await app.exports.release(request.id, HUMAN);
+          expect(started.success).toBe(false);
+          expect(started.error).toContain('read-only');
+          expect(() => app.exports.status(request.id, HUMAN)).toThrow();
         } finally {
           await app.exports.shutdown();
           await app.connections.shutdown();

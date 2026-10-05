@@ -6,7 +6,7 @@
 
 支援 SQLite、PostgreSQL、MySQL／MariaDB、SQL Server、Redis、繁中／英文桌面工作區與 Remote MCP。逐項功能與驗證證據列在 [IMPLEMENTATION.md](history/implementation-log.md)。
 
-另提供 **SAP／Sybase ASE 16.x 實驗性接入**（待真機驗證），須另外安裝 SAP ASE ODBC 驅動。連線方式、功能限制及 `npm run test:sybase` 驗證指令見 [ASE 支援計畫與交付紀錄](engines/sybase-support.md)。
+另提供 **SAP／Sybase ASE 實驗性唯讀接入**：目前以 ASE 11.x 為實測目標，11.5.1.2 已通過基本連線／唯讀查詢；16.x 尚未真機驗證。GUI／MCP 均禁止寫入、DDL、SQL 檔案執行及原生 SQL 匯出。須另外安裝 SAP ASE ODBC 驅動；`npm run test:sybase` 現在僅執行唯讀測試，詳見 [ASE 唯讀支援](engines/sybase-support.md)。
 
 ## 開發
 
@@ -176,13 +176,13 @@ SQLite、MySQL／MariaDB、PostgreSQL、SQL Server 資料庫的右鍵／「⋯�
 - SQL Server 需另安裝 PowerShell 與該 PowerShell 主機可載入的 `SqlServer` 模組；Windows 也接受既有 SQLPS。Windows 預設使用系統 Windows PowerShell 5.1，其他平台從 PATH 尋找 pwsh；可在連線表單指定絕對路徑。SMO 版本須支援來源伺服器，程式不自動安裝工具。密碼只從 stdin 傳遞，不寫入命令列／檔案；TLS 使用原生 SqlClient 憑證驗證，不忽略憑證錯誤。
 - SQL Server 資料匯出在全部使用者資料表持有共享鎖，完成／失敗／取消時釋放，期間會阻擋寫入。需要資料庫 VIEW DEFINITION 及所有目標資料的 SELECT 權限；有遮罩欄位時另需資料庫 UNMASK。啟用 RLS、Always Encrypted、temporal／ledger 資料目前明確拒絕資料模式，可改匯出結構；其他無法鎖定／序列化的特殊資料表也不輸出半成品。匯出期間應停止 DDL，程式會檢查 sys.objects 變更，但不將此檢查視為所有 metadata 的交易快照。
 - SQL Server 請還原到相容版本、原定序相同的空白資料庫，先備妥參照的帳號／角色、filegroup、CLR assembly 等外部相依；不包含 CREATE DATABASE、資料庫預設設定、使用者／角色建立或全伺服器物件。原生結構包含 schema、型別、序號、分割配置、Table／Index／View／Trigger、函式／預存程序、synonym、full-text 與 security policy，以及物件授權／註解。未具備外部相依時，匯入會回報失敗；這不是完整伺服器備份替代品。
-- 顯示匯出大小、資料表／資料列數與進度，可取消。PostgreSQL 原生工具未提供資料列計數，以「—」表示；查詢逾時作為等待工具輸出的閒置期限，取消／逾時會終止工具並等待其結束。沿用 SQL 檔案匯入的 16 MiB 與 50000 批次上限。SQLite 虛擬／shadow table、所有 rowid 別名均被遮蔽的資料表，以及 MariaDB sequences／system-versioned tables、遠端／特殊儲存引擎目前會明確拒絕；ASE 已加入實驗性原生 ddlgen 結構與 JDBC 資料匯出，真機驗收仍待環境。超出伺服器 max_allowed_packet 造成值序列化失敗時亦拒絕，不將原資料誤寫為 NULL。
+- 顯示匯出大小、資料表／資料列數與進度，可取消。PostgreSQL 原生工具未提供資料列計數，以「—」表示；查詢逾時作為等待工具輸出的閒置期限，取消／逾時會終止工具並等待其結束。沿用 SQL 檔案匯入的 16 MiB 與 50000 批次上限。SQLite 虛擬／shadow table、所有 rowid 別名均被遮蔽的資料表，以及 MariaDB sequences／system-versioned tables、遠端／特殊儲存引擎目前會明確拒絕；ASE 的原生 SQL 匯出已停用。超出伺服器 max_allowed_packet 造成值序列化失敗時亦拒絕，不將原資料誤寫為 NULL。
 - 成功前只寫入應用程式產生的暫存檔；失敗／取消不開放儲存。儲存以目的目錄暫存檔完成後替換，不直接覆寫未完成的檔案，並拒絕覆蓋已設定的 SQLite 資料庫檔。關閉視窗／應用程式清除匯出暫存檔。
 - MCP 使用 `export.manage` 的 `start`、`status`、`read`、`cancel`、`release` actions，委派至共用匯出命令。`read` 以 byte offset 分批回傳最多 64 KiB 的 base64；沒有任意本機檔案讀寫參數。Agent 只能讀取自己建立的匯出，且每次檢查目前連線權限／設定。完成後應呼叫 `release`；最多同時 4 個工作、保留 12 個匯出。
 
 桌面驗證：`npm run test:desktop:sql-export`；啟動整合服務後可執行 `npm run test:desktop:mysql-export`、`npm run test:desktop:postgres-export`、`npm run test:desktop:sqlserver-export`。SQLite 資料往返與權限測試：`npm test -- --maxWorkers=1 --no-isolate tests/sql-export.test.ts`；MySQL／MariaDB／PostgreSQL／SQL Server 已納入 `npm run test:integration`。PostgreSQL 測試需在主機安裝 `pg_dump`；已驗證 Windows pg_dump 18.0 對 PostgreSQL 17.11。SQL Server 需上述 PowerShell 模組，已驗證 SQLPS／SMO 16 對 SQL Server 2022；Windows 身分測試另設 `TEST_WINDOWS_SQLSERVER=1`，依下節本機環境執行。其他版本仍受原生相容性限制。
 
-ASE 的結構／資料匯出需在連線設定指定合法安裝的 SAP DDLGen.jar、jconn4.jar，可另指定 Java 執行檔。資料模式另需 JDK 11+，對資料表取共用鎖並暫時阻擋寫入；保留精確數值、文字、二進位、時間與 identity，外鍵／Trigger 延後建立。未知原生腳本排序、加密／遠端表及受資料存取規則限制的資料庫會拒絕匯出。輸出保留 CREATE DATABASE、USE、裝置及帳號相依設定，還原前須檢查目標環境；不適用於直接套入任意空白資料庫。目前通過 Java 測試替身與共用匯出流程驗證，真實 SAP 工具／ASE 驗收仍待環境。工具設定與驗證方式見 [ASE 支援文件](engines/sybase-support.md)。
+ASE 一律唯讀，結構／資料的原生 SQL 匯出均停用；不啟動 DDLGen／JDBC 匯出工具，也不對資料表取匯出鎖。已取得查詢結果的 CSV／JSON 匯出仍可使用，詳見 [ASE 唯讀支援](engines/sybase-support.md)。
 
 ## 真實資料庫整合測試
 
@@ -327,11 +327,11 @@ Windows 驗證參數依據：[ODBC Address／ServerSPN／HostnameInCertificate](
 
 Redis 底層 socket 透過 Node 的 `net.client.socket` 建立通知辨識，以 AsyncLocalStorage 限定本次連線的非同步範圍；不改寫全域 socket factory。通知訂閱在連線成功／失敗後移除，後續只追蹤取得的實體 socket。此 Node 內建 channel 仍屬 experimental；若執行環境無法唯一辨識 socket 且已啟用 I/O 期限，會關閉連線並明確報錯，不會默默忽略設定。更新 Node／Electron 時應重跑 `redis-io.test.ts` 與連線選項桌面 smoke。
 
-ASE 已接上獨立 session 的 Read／Write Timeout（0 停用），適用於登入、查詢、DDL、SQL 檔案及 Heartbeat；閒置連線不計讀取期限，失敗關閉該傳輸且不重送語句。啟用期限並搭配 TLS 時，請提供 PEM CA 憑證檔案，由 App 驗證原始主機名稱及信任鏈並加密上游傳輸；SAP ODBC 與 App 僅透過本機回送連線。未啟用期限時保留原有 SAP ODBC TLS 路徑。TCP／TLS 模擬驅動測試及桌面設定驗證已通過，真實 ASE 仍待環境；詳見 [ASE 驗證方式](engines/sybase-support.md)。
+ASE 的 Read／Write Timeout（0 停用）適用於唯讀登入、查詢及 Heartbeat；Write Timeout 限制傳輸寫入，不表示開放資料庫寫入。閒置連線不計读取期限，失敗關閉傳輸且不重送。TLS／期限僅有替身驗證，本輪 ASE 11.5 真機只驗證未啟用網路期限／TLS 的基本查詢；詳見 [ASE 驗證方式](engines/sybase-support.md)。
 
-PostgreSQL 可選 UTF8（預設）、LATIN1、WIN1252、BIG5、GBK、GB18030、SJIS、EUC_JP。主程序在 pg Connection 的協定邊界轉換 SQL、文字參數、欄位名稱、資料、通知與錯誤訊息；二進位參數及驗證訊息不轉碼，TLS 信任檢查與實際 socket 的讀寫期限不變。無法無損轉換的文字會報錯，不替換成問號。伺服器與資料庫必須支援所選編碼的轉換；設定不會修改資料庫或既有資料。SQL Server 的用戶端編碼由 Unicode 與欄位定序決定，沒有對應的連線級選項。ASE 的原生橋接亦使用 UTF-8；ODBC 分別設定 `CharSet=ClientDefault`、`ClientCharset`（Windows 為 UTF-8 code page 65001，其他平台為 utf8）及 `CodePageType=Other`，避免把轉換模式誤寫成字元集名稱。ASE 現在也提供 JDBC 編碼選項，詳見下段；兩條路徑都仍待真實 SAP 伺服器驗收。
+PostgreSQL 可選 UTF8（預設）、LATIN1、WIN1252、BIG5、GBK、GB18030、SJIS、EUC_JP。主程序在 pg Connection 的協定邊界轉換 SQL、文字參數、欄位名稱、資料、通知與錯誤訊息；二進位參數及驗證訊息不轉碼，TLS 信任檢查與實際 socket 的讀寫期限不變。無法無損轉換的文字會報錯，不替換成問號。伺服器與資料庫必須支援所選編碼的轉換；設定不會修改資料庫或既有資料。SQL Server 的用戶端編碼由 Unicode 與欄位定序決定，沒有對應的連線級選項。ASE ODBC 現在使用 `CharSet=ServerDefault;Language=us_english`，避免向舊版伺服器要求不存在的 Windows locale 字元集。本輪只驗證中文常數往返，不宣稱所有業務資料的編碼相容；JDBC 路徑仍待真實 SAP 驗證。
 
-ASE 連線的「用戶端字元集」預設為 UTF-8 (ODBC)，保留既有連線行為。選擇 JDBC 的 UTF-8、Latin-1、Windows-1252、Big5、GBK、GB18030、Shift JIS／MS932 或 EUC-JP 時，查詢改用 SAP jConnect；需 JDK 11+ 與合法取得的 `jconn4.jar` 絕對路徑，查詢不需要 DDLGen.jar。每個實體 session 由獨立 Java worker 管理，涵蓋目錄、參數、DDL、SQL 檔案、Heartbeat、取消與讀寫期限。SQL／參數不能表示為所選編碼時拒絕送出；登入及獨立查詢前後核對伺服器 `@@client_csname`，錯誤或截斷警告不當成成功。SQL 檔案批次之間不插入檢查查詢，以保留 `@@rowcount`／`@@error`；改在整份腳本結束時核對，多語句 DDL 則於提交前核對。腳本不可動態切換用戶端編碼，已執行的語句不因結尾檢查失敗而自動回滾。JDBC TLS 一律由 App 驗證原始主機與 PEM CA，即使未設定讀寫期限亦同。SQL 匯出獨立固定 UTF-8，還原請使用 UTF-8 連線。已通過 Java 替身、TCP／TLS 及桌面設定測試；尚未取得 SAP JAR／ASE 真機證據，仍為實驗性支援。詳見 [ASE 編碼實作與驗收](engines/sybase-encoding.md)。
+ASE 連線的「用戶端字元集」預設為「ODBC（伺服器預設編碼）」。選用 JDBC 編碼需 JDK 11+ 與合法取得的 `jconn4.jar`；查詢、目錄、Heartbeat 仍受同一唯讀限制，寫入、DDL、SQL 檔案執行及原生 SQL 匯出不開放。JDBC 字元集驗證與 TLS／期限有替身測試，尚未取得本輪 SAP JDBC 真機證據，詳見 [ASE 唯讀支援](engines/sybase-support.md)。
 
 PostgreSQL 的 pg 相容層固定於已驗證的 8.23.0，升級前須重跑協定與真實資料庫測試。請從連線設定修改編碼並重新連線；SQL 內切換 client_encoding 會關閉該 session 並報錯，收到結果解碼錯誤不代表先前寫入未發生。唯讀查詢以有界 portal 擷取 offset＋limit＋1 列，再等候伺服器完成狀態，避免過早交付錯誤編碼的結果。pg_dump 匯出獨立使用 UTF-8，還原其 SQL 檔案時請選 UTF8 連線。
 
@@ -459,12 +459,13 @@ GUI／MCP 共用 `object.describe`、`object.preview`、`object.apply`，套用�
 
 ## 結果操作與多條件篩選
 
-- 資料表 Data 頁可以新增最多 30 個篩選條件，按「套用」後以 AND 組合送出。支援移除單一已套用條件及清除全部；NULL 條件不需要值，空字串是有效篩選值。有未儲存資料修改時禁止變更篩選，套用或移除條件會回到第一頁。
+- 資料表 Data 頁首次讀取、刷新、翻頁、排序及套用篩選時，頂部顯示旋轉圖示與「資料讀取中…」。讀取期間保留先前結果並沿用操作停用保護，最新讀取完成或失敗後移除提示；錯誤仍使用既有訊息流程。減少動態效果設定會停止旋轉，但保留文字。此顯示適用所有使用資料表 Data 頁的 SQL 引擎，不改變後端讀取或權限。
+- 資料表 Data 頁在「重新整理」旁提供「過濾」開關，展開右側直立條件面板（預設收合）。收合保留條件草稿及已套用篩選，按鈕顯示已套用條件數；可用面板關閉按鈕或 Escape 收合。窄資料區改為右側覆蓋面板，條件清單獨立捲動。可以新增最多 30 個篩選條件，按「套用」後以 AND 組合送出。支援移除單一已套用條件及清除全部；NULL 條件不需要值，空字串是有效篩選值。有未儲存資料修改時禁止變更篩選，套用或移除條件會回到第一頁。
 - 查詢／資料表結果提供「複製目前頁」「複製選取列」及「匯出目前頁」。複製透過固定 IPC 使用桌面剪貼簿，使用包含欄名的 TSV；匯出提供 UTF-8 CSV／JSON，透過桌面原生儲存視窗選擇檔案。只包含目前頁及可見欄位，包含已反映在表格的未儲存修改；不會自動讀取其他頁面。切換查詢結果頁後清除列選取。
 - CSV 對引號、分隔字元與換行做引用／跳脫，NULL 使用空白欄位；JSON 保留 NULL、空字串、布林與數值，驅動以文字回傳的 BIGINT／DECIMAL 保持文字。匯出最多 16 MiB，取消儲存不寫入檔案；操作稽核只記錄格式與位元組數，不記錄匯出內容。`file.result.save` 僅供桌面使用者，MCP 工具數量維持 16 項。
 - 儲存格的查看按鈕支援滑鼠與鍵盤，開啟唯讀長文字／JSON 檢視器，可複製原始內容、切換原始／格式化 JSON。格式化保留原始數字字面值；大於 1 MiB 或巢狀超過 64 層的 JSON 使用原始文字檢視。
 
-專用桌面驗證：`npm run test:desktop:result-tools`，使用隔離 SQLite 資料與原生儲存視窗替身，驗證篩選、草稿保護、複製、匯出、取消、精確 JSON 檢視及中英文／明暗／720p／1080p 布局。
+專用桌面驗證：`npm run test:desktop:result-tools`，使用隔離 SQLite 資料與原生儲存視窗替身，驗證篩選、草稿保護、複製、匯出、取消、精確 JSON 檢視及中英文／明暗／720p／1080p 布局。`npm run test:desktop:table-loading` 使用實際 TableView 與可控制完成的 IPC 替身，驗證慢速首次讀取、刷新／翻頁、成功／失敗／空結果、重疊請求與減少動態效果；不連接真實資料庫或讀取業務資料。
 
 Redis 多資料庫桌面驗證：啟動整合測試服務並完成建置後，執行 `node scripts/smoke-redis-databases.mjs`。
 

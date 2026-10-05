@@ -1,4 +1,9 @@
 import type { Engine, Filter, SelectInput, TableRef } from '../../shared/types';
+export type ExactNumericProjection = {
+  kind: 'numeric' | 'money';
+  precision: number;
+  scale: number;
+};
 export class SqlBuilder {
   private params: unknown[] = [];
   constructor(private engine: Engine) {}
@@ -23,7 +28,10 @@ export class SqlBuilder {
         ? `@p${this.params.length}`
         : '?';
   }
-  where(filters: Filter[] = []) {
+  where(
+    filters: Filter[] = [],
+    textColumns: ReadonlyMap<string, ExactNumericProjection> = new Map(),
+  ) {
     return filters.length
       ? ' WHERE ' +
           filters
@@ -40,18 +48,64 @@ export class SqlBuilder {
               // `col = NULL` is never true in SQL; an explicit null means "is / is not null".
               if (filter.value == null && (filter.operator === '=' || filter.operator === '!='))
                 return `${column} ${filter.operator === '=' ? 'IS NULL' : 'IS NOT NULL'}`;
-              return `${column} ${filter.operator} ${this.bind(filter.value ?? null)}`;
+              const type = this.engine === 'sybase' ? textColumns.get(filter.column) : undefined;
+              if (type && filter.operator === 'LIKE') {
+                const exact = type.kind === 'money' ? `CONVERT(numeric(38,4), ${column})` : column;
+                return `CONVERT(varchar(80), ${exact}) LIKE ${this.bind(filter.value ?? null)}`;
+              }
+              let parameter = this.bind(filter.value ?? null);
+              if (type && typeof filter.value === 'string') {
+                // ASE11 disallows implicit CHAR -> DECIMAL comparison. Size the
+                // parameter from its OWN digits, not the column scale (no rounding).
+                const decimal = /^[+-]?(\d*)(?:\.(\d*))?$/.exec(filter.value.trim());
+                if (!decimal || !(decimal[1] || decimal[2]))
+                  throw new Error('ASE numeric filters require a plain decimal value.');
+                const scale = (decimal[2] ?? '').length;
+                const precision = Math.max(1, decimal[1].replace(/^0+/, '').length + scale);
+                if (precision > 38)
+                  throw new Error('ASE numeric filter exceeds 38-digit precision.');
+                parameter = `CONVERT(numeric(38,${scale}), ${parameter})`;
+              }
+              return `${column} ${filter.operator} ${parameter}`;
             })
             .join(' AND ')
       : '';
   }
-  select(input: SelectInput, limit: number) {
-    let sql = `SELECT ${input.columns?.map((name) => this.quote(name)).join(', ') ?? '*'} FROM ${this.table(input)}${this.where(input.filters)}`;
+  select(
+    input: SelectInput,
+    limit: number,
+    textColumns: ReadonlyMap<string, ExactNumericProjection> = new Map(),
+  ) {
+    const source =
+      this.engine === 'sybase' && textColumns.size ? this.quote('ase_read_source') : undefined;
+    const projection =
+      input.columns
+        ?.map((name) => {
+          const column = this.quote(name);
+          // ASE precision <=38 plus sign/decimal point fits in 80 chars.
+          // WHERE uses source values; ORDER BY is explicitly numeric below.
+          if (this.engine !== 'sybase' || !textColumns.has(name)) return column;
+          // Legacy ASE ignores money-to-text style 2; normalize to exact scale 4 first.
+          const exact =
+            textColumns.get(name)?.kind === 'money' ? `CONVERT(numeric(38,4), ${column})` : column;
+          return `CONVERT(varchar(80), ${exact}) AS ${column}`;
+        })
+        .join(', ') ?? '*';
+    let sql = `SELECT ${projection} FROM ${this.table(input)}${source ? ` ${source}` : ''}${this.where(input.filters, textColumns)}`;
     if (input.sort?.length)
       sql +=
         ' ORDER BY ' +
         input.sort
-          .map((sort) => `${this.quote(sort.column)} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`)
+          .map((sort) => {
+            const column = `${source ? `${source}.` : ''}${this.quote(sort.column)}`;
+            const type = this.engine === 'sybase' ? textColumns.get(sort.column) : undefined;
+            // ASE11 can resolve even qualified names to the text SELECT alias.
+            // An exact original-precision expression forces numeric ordering either way.
+            const ordered = type
+              ? `CONVERT(numeric(${type.precision},${type.scale}), ${column})`
+              : column;
+            return `${ordered} ${sort.direction === 'desc' ? 'DESC' : 'ASC'}`;
+          })
           .join(', ');
     if (this.engine === 'sqlserver')
       sql += `${input.sort?.length ? '' : ' ORDER BY (SELECT NULL)'} OFFSET ${this.bind(input.offset ?? 0)} ROWS FETCH NEXT ${this.bind(limit + 1)} ROWS ONLY`;

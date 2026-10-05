@@ -133,6 +133,7 @@ export function DatabaseExplorer({
             variant="ghost"
             title={t('Create database')}
             aria-label={t('Create database')}
+            disabled={connection.engine === 'sybase'}
             onClick={() => {
               if (connection.engine === 'sqlite') onNewFile();
               else {
@@ -389,6 +390,7 @@ function DatabaseNode({
     [connection.id, database],
   );
   const [tables, setTables] = useState<TableInfo[]>();
+  const [owners, setOwners] = useState<string[]>();
   const [error, setError] = useState('');
   useEffect(() => {
     if (selected?.database === database) setOpen(true);
@@ -399,6 +401,10 @@ function DatabaseNode({
     setError('');
     command<string[]>('schema.list', { connectionId: connection.id, database })
       .then(async (schemas) => {
+        if (connection.engine === 'sybase') {
+          if (!cancelled) setOwners([...new Set(schemas)].sort((a, b) => a.localeCompare(b)));
+          return;
+        }
         const objects: TableInfo[] = [];
         for (const schema of schemas) {
           if (cancelled) return;
@@ -423,7 +429,7 @@ function DatabaseNode({
     return () => {
       cancelled = true;
     };
-  }, [open, connection.id, database, scriptRevision, refresh]);
+  }, [open, connection.id, connection.engine, database, scriptRevision, refresh]);
   const label =
     connection.engine === 'sqlite' ? database.split(/[\\/]/).at(-1) || database : database;
   return (
@@ -455,8 +461,12 @@ function DatabaseNode({
         actions={[
           { label: t('Database properties'), run: () => setPropertiesOpen(true) },
           { label: t('Query'), run: () => onQuery(database) },
-          { label: t('Execute SQL file'), run: () => setScriptOpen(true) },
-          ...(['sqlite', 'mysql', 'postgres', 'sqlserver', 'sybase'].includes(connection.engine)
+          {
+            label: t('Execute SQL file'),
+            disabled: connection.engine === 'sybase',
+            run: () => setScriptOpen(true),
+          },
+          ...(['sqlite', 'mysql', 'postgres', 'sqlserver'].includes(connection.engine)
             ? [{ label: t('Export SQL file'), run: () => setExportOpen(true) }]
             : []),
         ]}
@@ -482,6 +492,28 @@ function DatabaseNode({
             <Alert className="notice" role="alert">
               {error}
             </Alert>
+          ) : connection.engine === 'sybase' ? (
+            !owners ? (
+              <p className="muted">{t('Loading…')}</p>
+            ) : owners.length === 0 ? (
+              <p className="navigation-empty">{t('No objects found.')}</p>
+            ) : (
+              owners.map((owner) => (
+                <OwnerNode
+                  key={owner}
+                  owner={owner}
+                  connection={connection}
+                  database={database}
+                  selected={selected}
+                  search={search}
+                  refresh={refresh}
+                  onScope={onScope}
+                  onOpen={onOpen}
+                  onObject={onObject}
+                  onError={onError}
+                />
+              ))
+            )
           ) : !tables ? (
             <p className="muted">{t('Loading…')}</p>
           ) : (
@@ -503,26 +535,30 @@ function DatabaseNode({
               />
             ))
           )}
-          <MetadataGroup
-            key={`index:${scriptRevision}`}
-            kind="index"
-            refresh={refresh}
-            schema={selected?.database === database ? selected.schema : undefined}
-            connectionId={connection.id}
-            database={database}
-            search={search}
-            onOpen={(object) => onObject(database, object)}
-          />
-          <MetadataGroup
-            key={`trigger:${scriptRevision}`}
-            kind="trigger"
-            refresh={refresh}
-            schema={selected?.database === database ? selected.schema : undefined}
-            connectionId={connection.id}
-            database={database}
-            search={search}
-            onOpen={(object) => onObject(database, object)}
-          />
+          {connection.engine !== 'sybase' && (
+            <>
+              <MetadataGroup
+                key={`index:${scriptRevision}`}
+                kind="index"
+                refresh={refresh}
+                schema={selected?.database === database ? selected.schema : undefined}
+                connectionId={connection.id}
+                database={database}
+                search={search}
+                onOpen={(object) => onObject(database, object)}
+              />
+              <MetadataGroup
+                key={`trigger:${scriptRevision}`}
+                kind="trigger"
+                refresh={refresh}
+                schema={selected?.database === database ? selected.schema : undefined}
+                connectionId={connection.id}
+                database={database}
+                search={search}
+                onOpen={(object) => onObject(database, object)}
+              />
+            </>
+          )}
           <Button
             variant="outline"
             className="tree-branch"
@@ -537,6 +573,121 @@ function DatabaseNode({
     </div>
   );
 }
+// ASE 11.x uses object owners; keep their identity separate from the table name.
+function OwnerNode({
+  owner,
+  connection,
+  database,
+  selected,
+  search,
+  refresh,
+  onScope,
+  onOpen,
+  onObject,
+  onError,
+}: {
+  owner: string;
+  connection: Connection;
+  database: string;
+  selected?: { database: string; schema: string };
+  search: string;
+  refresh: number;
+  onScope: (database: string, schema?: string) => Promise<void>;
+  onOpen: (database: string, table: TableInfo, structure?: boolean) => void;
+  onObject: (database: string, object: DatabaseObject) => void;
+  onError: (error: unknown) => void;
+}) {
+  const t = useI18n();
+  const active = selected?.database === database && selected.schema === owner;
+  const [open, setOpen] = useState(active);
+  const [tables, setTables] = useState<TableInfo[]>();
+  const [error, setError] = useState('');
+  const expanded = open || !!search;
+  useEffect(() => {
+    if (active) setOpen(true);
+  }, [active]);
+  useEffect(() => {
+    if (!expanded) return;
+    let current = true;
+    setError('');
+    command<TableInfo[]>('table.list', { connectionId: connection.id, database, schema: owner })
+      .then((value) => {
+        if (current) setTables(value.filter((table) => table.schema === owner));
+      })
+      .catch((error: Error) => {
+        if (current) setError(error.message);
+      });
+    return () => {
+      current = false;
+    };
+  }, [expanded, connection.id, database, owner, refresh]);
+  return (
+    <div className="owner-node" data-owner={owner}>
+      <Button
+        size="default"
+        variant="outline"
+        className={`tree-branch ${active ? 'selected' : ''}`}
+        title={t('Owner {name}', { name: owner })}
+        aria-label={t('Owner {name}', { name: owner })}
+        aria-expanded={expanded}
+        onClick={() => {
+          setOpen(!open);
+          if (!expanded || !active) void onScope(database, owner).catch(onError);
+        }}
+      >
+        <span aria-hidden="true">{expanded ? '▾' : '▸'} ◇</span>
+        <span>{owner}</span>
+      </Button>
+      {expanded && (
+        <div className="tree-children">
+          {error ? (
+            <Alert className="notice" role="alert">
+              {error}
+            </Alert>
+          ) : !tables ? (
+            <p className="muted">{t('Loading…')}</p>
+          ) : (
+            (['table', 'view'] as const).map((kind) => (
+              <ObjectGroup
+                key={kind}
+                schema={owner}
+                kind={kind}
+                connection={connection}
+                database={database}
+                tables={tables.filter((table) => table.kind === kind)}
+                showSchema={false}
+                search={search}
+                onError={onError}
+                onOpen={(table, structure) => {
+                  void onScope(database, owner).catch(onError);
+                  onOpen(database, table, structure);
+                }}
+              />
+            ))
+          )}
+          {(['index', 'trigger'] as const).map((kind) => (
+            <MetadataGroup
+              key={kind}
+              readOnly
+              kind={kind}
+              schema={owner}
+              owner={owner}
+              refresh={refresh}
+              connectionId={connection.id}
+              database={database}
+              search={search}
+              onOpen={(object) => {
+                void onScope(database, owner).catch(onError);
+                onObject(database, object);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ObjectGroup({
   kind,
   schema,
@@ -573,6 +724,7 @@ function ObjectGroup({
           actions={[
             {
               label: t(`Create ${kind}`),
+              disabled: connection.engine === 'sybase',
               run: () => {
                 void command('app.open_create_object', {
                   connectionId: connection.id,
@@ -604,6 +756,7 @@ function ObjectGroup({
           className="create-object-entry"
           aria-label={t(`Create ${kind}`)}
           title={t(`Create ${kind}`)}
+          disabled={connection.engine === 'sybase'}
           onClick={() =>
             void command('app.open_create_object', {
               connectionId: connection.id,
@@ -623,6 +776,7 @@ function ObjectGroup({
             <ExplorerTable
               key={`${table.schema}.${table.name}`}
               connectionId={connection.id}
+              readOnly={connection.engine === 'sybase'}
               database={database}
               table={table}
               displayName={
@@ -639,6 +793,8 @@ function ObjectGroup({
 }
 
 function MetadataGroup({
+  owner,
+  readOnly = false,
   kind,
   schema,
   connectionId,
@@ -648,6 +804,8 @@ function MetadataGroup({
   refresh = 0,
 }: {
   refresh?: number;
+  readOnly?: boolean;
+  owner?: string;
   kind: 'index' | 'trigger';
   schema?: string;
   connectionId: string;
@@ -679,8 +837,10 @@ function MetadataGroup({
     };
   }, [expanded, kind, connectionId, database, revision, refresh]);
   const label = kind === 'index' ? 'Index' : 'Trigger';
-  const visible = objects?.filter((item) =>
-    `${item.schema}.${item.table}.${item.name}`.toLowerCase().includes(search.toLowerCase()),
+  const visible = objects?.filter(
+    (item) =>
+      (owner === undefined || item.schema === owner) &&
+      `${item.schema}.${item.table}.${item.name}`.toLowerCase().includes(search.toLowerCase()),
   );
   return (
     <div className="object-group" data-kind={kind}>
@@ -716,6 +876,7 @@ function MetadataGroup({
           actions={[
             {
               label: t(`Create ${kind}`),
+              disabled: readOnly,
               run: () => {
                 void command('app.open_create_object', {
                   connectionId: connectionId,
@@ -747,6 +908,7 @@ function MetadataGroup({
           className="create-object-entry"
           aria-label={t(`Create ${kind}`)}
           title={t(`Create ${kind}`)}
+          disabled={readOnly}
           onClick={() =>
             void command('app.open_create_object', {
               connectionId: connectionId,
@@ -776,8 +938,8 @@ function MetadataGroup({
                 label={t('Object actions for {name}', { name: item.name })}
                 actions={[
                   { label: t('Edit definition'), run: () => onOpen(item) },
-                  { label: t(`Rename ${kind}`), run: () => setRenaming(item) },
-                  { label: t(`Delete ${kind}`), run: () => setDeleting(item) },
+                  { label: t(`Rename ${kind}`), disabled: readOnly, run: () => setRenaming(item) },
+                  { label: t(`Delete ${kind}`), disabled: readOnly, run: () => setDeleting(item) },
                   {
                     label: t('Copy full name'),
                     run: () =>

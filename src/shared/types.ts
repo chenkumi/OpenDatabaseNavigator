@@ -187,6 +187,8 @@ export interface WorkspaceTab {
   sql: string;
   dirty: boolean;
   result?: QueryResult;
+  /** Bumps whenever `result` is replaced, so a change event can leave an unchanged result out. */
+  resultVersion?: number;
   selectedRows: unknown[];
 }
 export interface Workspace {

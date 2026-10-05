@@ -1,4 +1,5 @@
 import sqlParser from 'node-sql-parser';
+import { assertAseReadOnly } from './ase-readonly';
 import type { Engine, Risk } from '../../shared/types';
 const parser = new sqlParser.Parser();
 const dialects = {
@@ -16,6 +17,14 @@ export interface SqlAnalysis {
 }
 // Classification fails closed. Unknown SQL is never treated as a read operation.
 export function analyzeSql(sql: string, engine: Engine): SqlAnalysis {
+  if (engine === 'sybase') {
+    try {
+      assertAseReadOnly(sql);
+      return { risk: 'read', statement: 'select', reason: 'ASE read-only SELECT profile.' };
+    } catch (error) {
+      return { risk: 'destructive', statement: 'unsupported', reason: (error as Error).message };
+    }
+  }
   const explain = /^\s*EXPLAIN\s+(?:QUERY\s+PLAN\s+)?([\s\S]+)$/i.exec(sql);
   if (explain && !/^EXPLAIN\b/i.test(explain[1])) {
     const inner = analyzeSql(explain[1], engine);

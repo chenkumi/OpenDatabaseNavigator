@@ -7,6 +7,8 @@ import type { RenameObjectInput } from '../../../shared/rename-object';
 const MAX_TABS = 100;
 export class WorkspaceService {
   private state: Workspace;
+  /** Coalesce disk writes of per-keystroke updates (enabled by the app, off for tests). */
+  debounced = false;
   constructor(
     private store: Store<Workspace>,
     private events: EventBus,
@@ -21,8 +23,17 @@ export class WorkspaceService {
           : ['index', 'trigger', 'table'].includes(tab.type) && !!tab.objectVersion,
     }));
   }
+  /** Version 0 is implicit, so tabs that never had a result stay unchanged. */
+  private versioned<T extends object>(tab: T, version: number): T {
+    return version ? { ...tab, resultVersion: version } : tab;
+  }
+  private resultVersions = new Map<string, number>();
+  private sentVersions = new Map<string, number>();
   get() {
-    return structuredClone(this.state);
+    return structuredClone({
+      ...this.state,
+      tabs: this.state.tabs.map((tab) => this.versioned(tab, this.resultVersions.get(tab.id) ?? 0)),
+    });
   }
   open(input: Omit<WorkspaceTab, 'id' | 'dirty' | 'selectedRows'>) {
     // Every tab keeps its view mounted; unbounded opens (for example from an agent)
@@ -45,8 +56,10 @@ export class WorkspaceService {
     const tab = this.state.tabs.find((item) => item.id === id);
     if (!tab) throw new Error('Tab not found.');
     Object.assign(tab, patch);
+    if ('result' in patch) this.resultVersions.set(id, (this.resultVersions.get(id) ?? 0) + 1);
     this.changed('WorkspaceChanged');
-    return structuredClone(tab);
+    // The (possibly large) result is delivered by events, not echoed to the caller.
+    return structuredClone({ ...tab, result: undefined });
   }
   activate(id: string) {
     const tab = this.state.tabs.find((item) => item.id === id);
@@ -124,7 +137,10 @@ export class WorkspaceService {
     this.changed('WorkspaceChanged');
     return retainedDrafts;
   }
-  private changed(type: string) {
+  private persistTimer?: ReturnType<typeof setTimeout>;
+  private persist() {
+    clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
     // Results can be large and may contain sensitive data; only persist tab metadata.
     this.store.write(
       this.sanitize({
@@ -135,6 +151,41 @@ export class WorkspaceService {
         })),
       }),
     );
-    this.events.emit(type, this.get());
+  }
+  /** Write any pending debounced state; call before the process exits. */
+  flush() {
+    if (this.persistTimer) this.persist();
+  }
+  private changed(type: string) {
+    // Editing sends an update per keystroke: coalesce those disk writes. Structural
+    // changes (open, close, reorder) are still written immediately.
+    if (type === 'WorkspaceChanged' && this.debounced) {
+      this.persistTimer ??= setTimeout(() => {
+        try {
+          this.persist();
+        } catch (error) {
+          console.error('Workspace write failed:', (error as Error).message);
+        }
+      }, 300);
+    } else this.persist();
+    this.events.emit(type, this.snapshot());
+  }
+  /**
+   * Event payload: every tab's result is up to thousands of rows, and each
+   * keystroke emits one. A result is sent only when it changed since the last
+   * event; the renderer keeps the previous one while `resultVersion` matches.
+   */
+  private snapshot(): Workspace {
+    const sent = new Map<string, number>();
+    const tabs = this.state.tabs.map((tab) => {
+      const version = this.resultVersions.get(tab.id) ?? 0;
+      sent.set(tab.id, version);
+      const { result, ...rest } = tab;
+      const include = result !== undefined && this.sentVersions.get(tab.id) !== version;
+      return structuredClone(this.versioned(include ? { ...rest, result } : rest, version));
+    });
+    for (const id of this.resultVersions.keys()) if (!sent.has(id)) this.resultVersions.delete(id);
+    this.sentVersions = sent;
+    return { ...structuredClone({ ...this.state, tabs: [] }), tabs };
   }
 }

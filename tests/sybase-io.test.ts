@@ -36,9 +36,9 @@ async function fixture(tls = false, writeStall = false, host = 'localhost', trus
         if (sql === 'login') send({ login: true });
         else if (sql.includes('@@version'))
           send({ value: 'Adaptive Server Enterprise/16.0 SP04', name: 'version' });
-        else if (sql === 'hang') {
+        else if (sql === 'SELECT hang') {
           /* intentionally no response */
-        } else if (sql === 'progress') {
+        } else if (sql === 'SELECT progress') {
           let count = 0;
           const timer = setInterval(() => {
             send(++count < 7 ? { progress: true } : { value: 'done' });
@@ -65,7 +65,7 @@ async function fixture(tls = false, writeStall = false, host = 'localhost', trus
   const closed: boolean[] = [];
   const driver: AseDriver = {
     open({ conn_str }, callback) {
-      expect(conn_str).toContain('Server={127.0.0.1}');
+      expect(conn_str).toContain('Server=127.0.0.1');
       expect(conn_str).toContain('HASession=0;RetryCount=0;');
       expect(conn_str).not.toContain('Encryption=ssl');
       const port = Number(/;Port=(\d+);/.exec(conn_str)![1]);
@@ -195,15 +195,19 @@ it.each([false, true])(
       expect(f.ports).toHaveLength(1);
       await delay(320);
       await f.adapter.heartbeat(2000);
-      expect((await f.adapter.query('progress', [], options)).rows).toEqual([{ value: 'done' }]);
-      const stalled = expect(f.adapter.query('hang', [], options)).rejects.toThrow(
+      expect((await f.adapter.query('SELECT progress', [], options)).rows).toEqual([
+        { value: 'done' },
+      ]);
+      const stalled = expect(f.adapter.query('SELECT hang', [], options)).rejects.toThrow(
         'Network read timed out',
       );
-      expect((await f.adapter.query('healthy', [], options)).rows).toEqual([{ value: 'healthy' }]);
+      expect((await f.adapter.query('SELECT healthy', [], options)).rows).toEqual([
+        { value: 'SELECT healthy' },
+      ]);
       await stalled;
-      expect(f.statements.filter((sql) => sql === 'hang')).toHaveLength(1);
-      expect((await f.adapter.query('recovered', [], options)).rows).toEqual([
-        { value: 'recovered' },
+      expect(f.statements.filter((sql) => sql === 'SELECT hang')).toHaveLength(1);
+      expect((await f.adapter.query('SELECT recovered', [], options)).rows).toEqual([
+        { value: 'SELECT recovered' },
       ]);
       expect(f.closed.slice(1).every(Boolean)).toBe(true);
       expect(new Set(f.ports).size).toBe(f.ports.length);
@@ -218,31 +222,31 @@ it.each([false, true])(
   async (tls) => {
     const f = await fixture(tls, true);
     try {
-      await expect(f.adapter.query('write-stall', [], options)).rejects.toThrow(
+      await expect(f.adapter.query('SELECT write-stall', [], options)).rejects.toThrow(
         'Network write timed out',
       );
-      expect(f.statements).not.toContain('write-stall');
-      expect((await f.adapter.query('next', [], options)).rows).toEqual([{ value: 'next' }]);
+      expect(f.statements).not.toContain('SELECT write-stall');
+      expect((await f.adapter.query('SELECT next', [], options)).rows).toEqual([
+        { value: 'SELECT next' },
+      ]);
     } finally {
       await f.close();
     }
   },
 );
 
-it('ASE scripts cannot continue or reconnect a failed session', async () => {
+it('ASE scripts are rejected before opening a transport', async () => {
   const f = await fixture();
   try {
-    await f.adapter.withScriptSession(async (execute) => {
-      await execute('first', new AbortController().signal, 3000);
-      await expect(execute('hang', new AbortController().signal, 3000)).rejects.toThrow(
-        'Network read timed out',
-      );
-      await expect(execute('must-not-run', new AbortController().signal, 3000)).rejects.toThrow(
-        'Network read timed out',
-      );
-    });
-    expect(f.ports).toHaveLength(2);
-    expect(f.statements).not.toContain('must-not-run');
+    let called = false;
+    await expect(
+      f.adapter.withScriptSession(async () => {
+        called = true;
+      }),
+    ).rejects.toThrow('read-only');
+    expect(called).toBe(false);
+    expect(f.ports).toHaveLength(0);
+    expect(f.statements).toEqual([]);
   } finally {
     await f.close();
   }

@@ -1,5 +1,7 @@
 # ASE 用戶端編碼：驅動限制與後續實作
 
+> 目前狀態：Sybase 已改為全面唯讀；ODBC 使用 `CharSet=ServerDefault;Language=us_english`，不再套用下文的 ClientDefault／ClientCharset 設定。ASE 11.5.1.2 已通過基本連線與中文常數往返，但尚未驗證既有 VARCHAR／TEXT 業務資料的編碼。下文保留先前設計與驅動限制，不代表目前開放寫入、SQL 檔案執行或原生匯出。現行功能與測試入口以 [ASE 唯讀支援](sybase-support.md) 為準。
+
 更新日期：2026-09-30。JDBC 傳輸與設定介面已實作，Java 替身／TCP／TLS／桌面測試已通過；SAP 驅動與真實 ASE 驗收仍未完成。
 
 ## 已確認的限制

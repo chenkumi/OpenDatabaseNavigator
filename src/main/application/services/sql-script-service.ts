@@ -217,22 +217,28 @@ export class SqlScriptService {
         progress.state = controller.signal.aborted ? 'cancelled' : 'failed';
         progress.error = (error as Error).message;
       } finally {
-        this.audit.record({
-          actor,
-          command: 'script.finished',
-          connectionId: input.connectionId,
-          database: input.database,
-          summary: JSON.stringify(this.auditArguments(input)),
-          status: progress.state === 'completed' ? 'success' : 'error',
-          duration: 0,
-          result: JSON.stringify({
-            state: progress.state,
-            completed: progress.completed,
-            total: progress.total,
-            failed: progress.failed,
-            error: progress.error,
-          }),
-        });
+        // A failing audit write must not skip the completion event, or the UI
+        // would stay in "running" forever.
+        try {
+          this.audit.record({
+            actor,
+            command: 'script.finished',
+            connectionId: input.connectionId,
+            database: input.database,
+            summary: JSON.stringify(this.auditArguments(input)),
+            status: progress.state === 'completed' ? 'success' : 'error',
+            duration: 0,
+            result: JSON.stringify({
+              state: progress.state,
+              completed: progress.completed,
+              total: progress.total,
+              failed: progress.failed,
+              error: progress.error,
+            }),
+          });
+        } catch (error) {
+          console.error('Could not audit script completion', error);
+        }
         emit(true);
         this.events.emit('SqlScriptFinished', {
           connectionId: input.connectionId,

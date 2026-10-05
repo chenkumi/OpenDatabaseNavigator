@@ -5,8 +5,10 @@ import { aseColumns, aseTables, aseSchemas, aseDatabases } from './sybase-catalo
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { nativeRelay } from '../network/native-relay';
-import { aseSqlExport } from './sql-export';
+import { SYBASE_READ_ONLY_REASON } from '../../../../shared/engine-capabilities';
+import { assertAseReadOnly } from '../../../security/ase-readonly';
 import { openAseJdbcSession } from './jdbc-session';
+import { aseLegacySql } from './legacy-sql';
 
 export interface AseQuery {
   on(event: string, callback: (...args: any[]) => void): unknown;
@@ -53,19 +55,20 @@ export function aseConnectionString(connection: Connection, password?: string, r
   };
   if (connection.tls && !connection.aseTrustedFile?.trim())
     throw new Error('ASE TLS requires a trusted certificates file.');
+  // Older SAP drivers interpret braces on ordinary values literally.
+  const value = (text: string) =>
+    text === text.trim() && !/[;{}\u0000-\u001f\u007f]/.test(text) ? text : quote(text);
   return (
     [
       `Driver=${quote(connection.aseDriver || 'Adaptive Server Enterprise')}`,
-      `Server=${quote(relayPort === undefined ? connection.host || 'localhost' : '127.0.0.1')}`,
+      `Server=${value(relayPort === undefined ? connection.host || 'localhost' : '127.0.0.1')}`,
       `Port=${relayPort ?? connection.port ?? 5000}`,
-      `Database=${quote(connection.database || 'master')}`,
-      `UID=${quote(connection.username || '')}`,
-      `PWD=${quote(password || '')}`,
-      // SAP ODBC distinguishes the conversion mode from the application's
-      // encoding. Native VARCHAR results are decoded as UTF-8 by the bridge.
-      'CharSet=ClientDefault',
-      `ClientCharset=${process.platform === 'win32' ? '65001' : 'utf8'}`,
-      'CodePageType=Other',
+      `Database=${value(connection.database || 'master')}`,
+      `UID=${value(connection.username || '')}`,
+      `PWD=${value(password || '')}`,
+      // Do not request the Windows locale (Big5) from a legacy server.
+      'CharSet=ServerDefault',
+      'Language=us_english',
       // This session is app-scoped; do not let driver failover leave the
       // monitored endpoint or replay work after a transport failure.
       ...(relayPort !== undefined ? ['HASession=0', 'RetryCount=0'] : []),
@@ -78,12 +81,36 @@ export function aseConnectionString(connection: Connection, password?: string, r
 
 /** ASE uses the native ODBC bridge directly, never mssql's SQL Server batches. */
 export class SybaseAdapter implements SqlAdapter {
+  aseMajorVersion?: number;
   private anchor?: AseSession;
   private opening?: Promise<void>;
   private generation = 0;
   private active = new Set<AbortController>();
+  private operations = new Map<AbortController, Promise<void>>();
+  private disconnecting?: Promise<void>;
+  private beginOperation() {
+    const controller = new AbortController();
+    let complete!: () => void;
+    this.operations.set(
+      controller,
+      new Promise<void>((resolve) => {
+        complete = resolve;
+      }),
+    );
+    this.active.add(controller);
+    return {
+      controller,
+      finish: () => {
+        this.active.delete(controller);
+        this.operations.delete(controller);
+        complete();
+      },
+    };
+  }
   private driver?: AseDriver;
   private transports = new Map<AseSession, Transport>();
+  private closing = new WeakMap<AseSession, Promise<void>>();
+  private pendingCloses = new Set<Promise<void>>();
   constructor(
     private connection: Connection,
     private password?: string,
@@ -114,13 +141,40 @@ export class SybaseAdapter implements SqlAdapter {
     );
     return new Error(message.startsWith('ASE: ') ? message : `ASE: ${message}`);
   }
-  private async close(session: AseSession) {
-    const transport = this.transports.get(session);
-    this.transports.delete(session);
-    await transport?.relay.close();
-    return new Promise<void>((resolve, reject) =>
-      session.close((error) => (error ? reject(this.safeError(error)) : resolve())),
-    );
+  private close(session: AseSession): Promise<void> {
+    const existing = this.closing.get(session);
+    if (existing) return existing;
+    const task = (async () => {
+      if (this.anchor === session) {
+        this.anchor = undefined;
+        this.generation++;
+      }
+      const transport = this.transports.get(session);
+      this.transports.delete(session);
+      // Destroy actual I/O before asking the native queue to close a session.
+      await transport?.relay.close();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('ASE session close cleanup timed out.')),
+          1000,
+        );
+        try {
+          session.close((error) => {
+            clearTimeout(timer);
+            if (error) reject(this.safeError(error));
+            else resolve();
+          });
+        } catch (error) {
+          clearTimeout(timer);
+          reject(this.safeError(error));
+        }
+      });
+    })();
+    this.closing.set(session, task);
+    this.pendingCloses.add(task);
+    const settled = () => this.pendingCloses.delete(task);
+    void task.then(settled, settled);
+    return task;
   }
   private async open(timeout: number, signal?: AbortSignal) {
     if (signal?.aborted) throw new Error('Query cancelled.');
@@ -128,10 +182,14 @@ export class SybaseAdapter implements SqlAdapter {
       return openAseJdbcSession(this.connection, this.password, timeout, signal, this.relayFactory);
     const deadline = Date.now() + timeout;
     let transport: Transport | undefined;
+    let ownedSession: AseSession | undefined;
     try {
       aseConnectionString(this.connection, this.password);
       this.driver ??= await this.loadDriver();
-      if (this.connection.readTimeout || this.connection.writeTimeout) {
+      // Plain native sessions also need a controllable socket boundary when
+      // cancellation never releases its statement. Keep native TLS without I/O
+      // deadlines on its existing certificate-verification path.
+      if (this.connection.readTimeout || this.connection.writeTimeout || !this.connection.tls) {
         const tls = this.connection.tls
           ? { ca: await readFile(this.connection.aseTrustedFile!) }
           : undefined;
@@ -147,6 +205,8 @@ export class SybaseAdapter implements SqlAdapter {
             if (transport) {
               transport.failure ??= error;
               transport.failOperation?.(error);
+              if (ownedSession && this.anchor === ownedSession)
+                void this.close(ownedSession).catch(() => undefined);
             }
           },
         );
@@ -173,6 +233,7 @@ export class SybaseAdapter implements SqlAdapter {
             reject(error);
           } else {
             try {
+              ownedSession = session;
               session!.setUseNumericString(true);
               if (transport) {
                 this.transports.set(session!, transport);
@@ -218,6 +279,7 @@ export class SybaseAdapter implements SqlAdapter {
     }
   }
   async connect() {
+    if (this.disconnecting) throw new Error('ASE connection is disconnecting.');
     if (this.anchor) return;
     if (this.opening) return this.opening;
     const generation = this.generation;
@@ -235,10 +297,14 @@ export class SybaseAdapter implements SqlAdapter {
           readOnly: true,
           signal: controller.signal,
         });
-        if (!/Adaptive Server Enterprise\/16\./i.test(String(result.rows[0]?.version ?? '')))
+        const major = Number(
+          /Adaptive Server Enterprise\/(\d+)\./i.exec(String(result.rows[0]?.version ?? ''))?.[1],
+        );
+        if (![11, 16].includes(major))
           throw new Error(
-            'This connection supports SAP ASE 16.x, not SQL Anywhere, SAP IQ or Microsoft SQL Server.',
+            'This read-only connection supports ASE 11.x and experimental ASE 16.x only.',
           );
+        this.aseMajorVersion = major;
         if (generation !== this.generation) throw new Error('Connection attempt was cancelled.');
         this.anchor = session;
       } catch (error) {
@@ -255,45 +321,78 @@ export class SybaseAdapter implements SqlAdapter {
     }
   }
   async disconnect() {
+    if (this.disconnecting) return this.disconnecting;
     this.generation++;
     for (const controller of this.active) controller.abort();
-    await this.opening?.catch(() => undefined);
-    const anchor = this.anchor;
-    this.anchor = undefined;
-    if (anchor) await this.close(anchor);
-  }
-  async heartbeat(timeout: number) {
-    if (!this.anchor) throw new Error('ASE connection is closed.');
-    await this.run(this.anchor, 'SELECT 1', [], { limit: 1, timeout, readOnly: true });
-  }
-  async exportSql(options: import('../../../../shared/sql-export').SqlExportOptions) {
-    const controller = new AbortController();
-    this.active.add(controller);
+    const operations = [...this.operations.values()];
+    const task = (async () => {
+      await this.opening?.catch(() => undefined);
+      await Promise.all(operations);
+      const anchor = this.anchor;
+      this.anchor = undefined;
+      if (anchor) void this.close(anchor).catch(() => undefined);
+      // Idle transport failures can already have detached their anchor while
+      // its native close is still pending. Include that background cleanup.
+      const closed = await Promise.allSettled([...this.pendingCloses]);
+      const failed = closed.find((result) => result.status === 'rejected');
+      if (failed?.status === 'rejected') throw failed.reason;
+    })();
+    this.disconnecting = task;
     try {
-      await aseSqlExport(this.connection, this.password, {
-        ...options,
-        signal: AbortSignal.any([options.signal, controller.signal]),
-      });
+      await task;
     } finally {
-      this.active.delete(controller);
+      if (this.disconnecting === task) this.disconnecting = undefined;
     }
   }
+  async heartbeat(timeout: number) {
+    if (!this.anchor || this.disconnecting) throw new Error('ASE connection is closed.');
+    const operation = this.beginOperation();
+    const { controller } = operation;
+    try {
+      await this.run(this.anchor, 'SELECT 1', [], {
+        limit: 1,
+        timeout,
+        readOnly: true,
+        signal: controller.signal,
+      });
+    } finally {
+      operation.finish();
+    }
+  }
+  async exportSql(
+    _options: import('../../../../shared/sql-export').SqlExportOptions,
+  ): Promise<void> {
+    throw new Error(SYBASE_READ_ONLY_REASON);
+  }
   async query(sql: string, params: unknown[], options: QueryOptions) {
+    if (!options.readOnly) throw new Error(SYBASE_READ_ONLY_REASON);
+    assertAseReadOnly(sql);
     if (/^\s*EXPLAIN\b/i.test(sql))
       throw new Error('ASE EXPLAIN is not supported in this release.');
-    await this.connect();
-    const controller = new AbortController();
+    if (this.disconnecting) throw new Error('ASE connection is disconnecting.');
+    const generation = this.generation;
+    const operation = this.beginOperation();
+    const { controller } = operation;
     const abort = () => controller.abort();
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
-    this.active.add(controller);
     const deadline = Date.now() + options.timeout;
     let session: AseSession | undefined;
     try {
+      if (controller.signal.aborted) throw new Error('Query cancelled.');
+      await this.connect();
+      if (controller.signal.aborted || generation !== this.generation)
+        throw new Error('Query cancelled.');
+      if (this.aseMajorVersion === 11) {
+        sql = aseLegacySql(sql);
+        assertAseReadOnly(sql);
+      }
       session = await this.open(
         Math.min(this.connection.connectionTimeout ?? 10000, options.timeout),
         controller.signal,
       );
+      if (controller.signal.aborted || generation !== this.generation)
+        throw new Error('Query cancelled.');
       return await this.run(session, sql, params, {
         ...options,
         timeout: Math.max(1, deadline - Date.now()),
@@ -307,104 +406,17 @@ export class SybaseAdapter implements SqlAdapter {
         // Closing is housekeeping: its failure must not turn a statement that already
         // ran into an error, nor hide the statement's own error.
       } finally {
-        this.active.delete(controller);
+        operation.finish();
       }
     }
   }
   async withScriptSession<T>(
-    task: (execute: import('../../script-session').ScriptExecute) => Promise<T>,
+    _task: (execute: import('../../script-session').ScriptExecute) => Promise<T>,
   ): Promise<T> {
-    await this.connect();
-    const controller = new AbortController();
-    this.active.add(controller);
-    let session: AseSession | undefined;
-    try {
-      session = await this.open(this.connection.connectionTimeout ?? 10000, controller.signal);
-      let verificationSignal = controller.signal;
-      let verificationTimeout = this.connection.connectionTimeout ?? 10000;
-      const result = await task(async (sql, signal, timeout) => {
-        if (controller.signal.aborted) throw new Error('Script session is closed.');
-        const combined = AbortSignal.any([signal, controller.signal]);
-        verificationSignal = combined;
-        verificationTimeout = Math.min(timeout, this.connection.connectionTimeout ?? 10000);
-        await this.run(session!, sql, [], {
-          limit: 0,
-          timeout,
-          readOnly: false,
-          signal: combined,
-          sessionMode: 'script',
-        });
-      });
-      await this.verifyEncoding(session, verificationTimeout, verificationSignal);
-      return result;
-    } finally {
-      try {
-        if (session) await this.close(session);
-      } catch {
-        // Closing is housekeeping: its failure must not turn a statement that already
-        // ran into an error, nor hide the statement's own error.
-      } finally {
-        this.active.delete(controller);
-      }
-    }
+    throw new Error(SYBASE_READ_ONLY_REASON);
   }
-  async executeDdl(statements: string[], timeout: number, options?: { rebuildTable?: string }) {
-    if (options?.rebuildTable) throw new Error('ASE table rebuild plans are not supported.');
-    await this.connect();
-    const controller = new AbortController();
-    this.active.add(controller);
-    const deadline = Date.now() + timeout;
-    let session: AseSession | undefined;
-    const run = (sql: string) =>
-      this.run(session!, sql, [], {
-        limit: 0,
-        timeout: Math.max(1, deadline - Date.now()),
-        readOnly: false,
-        signal: controller.signal,
-        sessionMode: 'script',
-      });
-    try {
-      session = await this.open(
-        Math.min(timeout, this.connection.connectionTimeout ?? 10000),
-        controller.signal,
-      );
-      if (statements.length > 1) await run('BEGIN TRANSACTION');
-      try {
-        for (const sql of statements) await run(sql);
-        await this.verifyEncoding(session, Math.max(1, deadline - Date.now()), controller.signal);
-        if (statements.length > 1) await run('COMMIT TRANSACTION');
-      } catch (error) {
-        if (statements.length > 1)
-          await this.run(session, 'ROLLBACK TRANSACTION', [], {
-            limit: 0,
-            timeout: 5000,
-            readOnly: false,
-            sessionMode: 'script',
-          }).catch(() => undefined);
-        throw new Error(
-          `ASE DDL failed. Multi-statement changes require the database ddl in tran option; refresh the definition before retrying. ${(error as Error).message}`,
-        );
-      }
-    } finally {
-      try {
-        if (session) await this.close(session);
-      } catch {
-        // Closing is housekeeping: its failure must not turn a statement that already
-        // ran into an error, nor hide the statement's own error.
-      } finally {
-        this.active.delete(controller);
-      }
-    }
-  }
-  private async verifyEncoding(session: AseSession, timeout: number, signal: AbortSignal) {
-    if (this.connection.charset)
-      await this.run(session, '', [], {
-        limit: 0,
-        timeout,
-        readOnly: false,
-        signal,
-        sessionMode: 'verify',
-      });
+  async executeDdl(_statements: string[], _timeout: number): Promise<void> {
+    throw new Error(SYBASE_READ_ONLY_REASON);
   }
   private run(
     session: AseSession,
@@ -423,13 +435,39 @@ export class SybaseAdapter implements SqlAdapter {
       let failure: Error | undefined,
         capped = false,
         ended = false,
-        cancelling = false;
+        cancelling = false,
+        forcingClose = false;
+      let cancelTimer: ReturnType<typeof setTimeout> | undefined;
       const stop = () => {
         if (cancelling || ended) return;
         cancelling = true;
+        cancelTimer = setTimeout(() => {
+          // Cancellation may not emit free on SAP ODBC. Confirm closure of
+          // the dedicated session instead; never return data just because
+          // we requested cancellation or closed the relay socket.
+          forcingClose = true;
+          void this.close(session).then(finish, (error) => {
+            failure ??= this.safeError(error);
+            finish();
+          });
+        }, 1000);
         try {
+          // Follow msnodesqlv8's stream cancellation contract: stop dispatching
+          // rows now, but let the current native row/batch callback unwind before
+          // cancel/free touches its handle (not synchronously inside 'row').
           query.pauseQuery();
-          query.cancelQuery();
+          setImmediate(() => {
+            if (ended) return;
+            try {
+              query.cancelQuery((error) => {
+                // A capped read intentionally cancels; its ODBC cancellation
+                // diagnostic is not a data error. Still require free or fail cleanup.
+                if (error && !ended && !capped) failure ??= this.safeError(error);
+              });
+            } catch (error) {
+              failure ??= this.safeError(error);
+            }
+          });
         } catch (error) {
           failure ??= this.safeError(error);
         }
@@ -463,6 +501,7 @@ export class SybaseAdapter implements SqlAdapter {
         ended = true;
         flush();
         clearTimeout(timer);
+        clearTimeout(cancelTimer);
         if (transport) {
           transport.failOperation = undefined;
           transport.relay.pauseRead(true);
@@ -478,6 +517,7 @@ export class SybaseAdapter implements SqlAdapter {
             // Closing the upstream wakes the native read. A paused worker
             // must resume to observe it and release the statement handle.
             query?.resumeQuery?.();
+            stop();
           };
           transport.relay.pauseRead(false);
         }
@@ -497,6 +537,7 @@ export class SybaseAdapter implements SqlAdapter {
         );
         options.signal?.addEventListener('abort', abort, { once: true });
         query.on('meta', (columns: Meta[]) => {
+          if (ended) return;
           flush();
           if (collector.result.columns.length) {
             failure = new Error('ASE queries returning multiple result sets are not supported.');
@@ -524,11 +565,12 @@ export class SybaseAdapter implements SqlAdapter {
           }
         });
         query.on('row', () => {
+          if (ended) return;
           flush();
           row = Object.create(null) as Record<string, unknown>;
         });
         query.on('column', (index: number, value: unknown) => {
-          if (!row || failure || capped) return;
+          if (ended || !row || failure || capped) return;
           if (
             ['numeric', 'bigint'].includes(meta[index]?.sqlType) &&
             value !== null &&
@@ -541,15 +583,20 @@ export class SybaseAdapter implements SqlAdapter {
           row[collector.result.columns[index]] = value;
         });
         query.on('rowcount', (count: number) => {
+          if (ended) return;
           flush();
           if (!meta.length && count > 0) collector.result.affectedRows += count;
         });
         query.on('error', (error: unknown) => {
+          if (ended) return;
           if (session.boundedReads || !capped || !options.readOnly)
             failure ??= this.safeError(error);
         });
-        // Wait for native handles to be released, including cancel/error paths.
-        query.on('free', finish);
+        // During forced close, free alone is not confirmation that session.close
+        // succeeded: wait for its callback before returning a capped page.
+        query.on('free', () => {
+          if (!forcingClose) finish();
+        });
         if (options.signal?.aborted) abort();
       } catch (error) {
         failure = this.safeError(error);

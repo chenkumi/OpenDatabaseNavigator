@@ -79,7 +79,13 @@ export class PostgresAdapter extends NetworkSqlAdapter {
       },
     });
     pool.on('error', () => undefined);
-    pool.on('connect', (client) => postgresSocketTimeouts(client, this.connection));
+    pool.on('connect', (client) => {
+      // pg-pool drops its idle error listener while a client is checked out, and pg
+      // emits transport failures on the Client; without a listener that is an
+      // uncaught exception in the main process. Active queries still get the error.
+      client.on('error', () => undefined);
+      postgresSocketTimeouts(client, this.connection);
+    });
     try {
       const client = await pool.connect();
       client.release();

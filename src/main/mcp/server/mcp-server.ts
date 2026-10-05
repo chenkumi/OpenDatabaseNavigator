@@ -140,7 +140,8 @@ export class McpGateway {
     const host = req.headers.host;
     let hostname: string;
     try {
-      hostname = new URL(`http://${host}`).hostname;
+      // URL keeps the brackets of an IPv6 literal, but allowedHosts lists it bare.
+      hostname = new URL(`http://${host}`).hostname.replace(/^\[|\]$/g, '');
     } catch {
       fail(403, 'Invalid host');
       return;
@@ -153,7 +154,7 @@ export class McpGateway {
       try {
         const origin = new URL(req.headers.origin);
         if (
-          !config.allowedHosts.includes(origin.hostname) ||
+          !config.allowedHosts.includes(origin.hostname.replace(/^\[|\]$/g, '')) ||
           origin.host !== host ||
           origin.protocol !== (config.remote ? 'https:' : 'http:')
         )

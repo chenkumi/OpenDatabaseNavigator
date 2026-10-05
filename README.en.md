@@ -10,7 +10,7 @@ A desktop database client for humans and AI agents. An Electron app to browse, q
 
 ## Features
 
-- **Databases**: SQLite, PostgreSQL, MySQL/MariaDB, SQL Server (SQL login, plus Windows authentication on Windows) and Redis. SAP/Sybase ASE is experimental and has not been verified against a real ASE server.
+- **Databases**: SQLite, PostgreSQL, MySQL/MariaDB, SQL Server (SQL login, plus Windows authentication on Windows) and Redis. SAP/Sybase ASE is experimental and read-only. Basic connectivity and SELECT queries have been verified on ASE 11.5.1.2; ASE 16.x remains unverified. Writes, DDL, SQL file execution and native SQL export are disabled for ASE.
 - **Queries and data**: Monaco SQL editor with table/column completion, virtualized result grid, inline editing, up to 30 AND filters, CSV/JSON export, SQL file execution, SQL dump export.
 - **Schema design**: table/view designer, indexes, triggers, foreign keys and CHECK constraints, generated columns. Create, rename and drop show a SQL preview first and check the object version.
 - **Redis**: browse and edit strings, hashes, lists, sets, sorted sets, streams and JSON, keeping TTLs.

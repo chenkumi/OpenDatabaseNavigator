@@ -44,33 +44,23 @@ const connection = {
   id: 'ase',
 };
 const options = { limit: 2, timeout: 1000, readOnly: true };
-it('uses SAP ODBC conversion mode and UTF-8 client encoding as separate properties', () => {
+it('uses legacy-compatible SAP values and server-default encoding', () => {
   const value = aseConnectionString(connection);
-  expect(value).toContain(
-    `CharSet=ClientDefault;ClientCharset=${process.platform === 'win32' ? '65001' : 'utf8'};CodePageType=Other;`,
-  );
-  expect(value).not.toContain('CharSet=utf8;');
+  expect(value).toContain('Server=localhost;');
+  expect(value).toContain('Database=test;UID=tester;');
+  expect(value).toContain('CharSet=ServerDefault;Language=us_english;');
+  expect(value).not.toContain('ClientCharset=');
 });
-it('ASE script batches share a dedicated native session and close it on failure', async () => {
-  const fake = native((sql) => (sql === 'bad' ? { error: 'bad batch' } : {}));
-  try {
-    await fake.adapter.withScriptSession(async (execute) => {
-      const signal = new AbortController().signal;
-      await execute('CREATE TABLE #temp (id int)', signal, 1000);
-      await execute('INSERT INTO #temp VALUES(1)', signal, 1000);
-    });
-    expect(fake.sessions[1].statements).toContain('CREATE TABLE #temp (id int)');
-    expect(fake.sessions[1].statements).toContain('INSERT INTO #temp VALUES(1)');
-    expect(fake.sessions[1].closed).toBe(true);
-    await expect(
-      fake.adapter.withScriptSession(async (execute) => {
-        await execute('bad', new AbortController().signal, 1000);
-      }),
-    ).rejects.toThrow();
-    expect(fake.sessions.at(-1)?.closed).toBe(true);
-  } finally {
-    await fake.adapter.disconnect();
-  }
+it('ASE rejects scripts before opening any native session', async () => {
+  const fake = native(() => ({}));
+  let called = false;
+  await expect(
+    fake.adapter.withScriptSession(async () => {
+      called = true;
+    }),
+  ).rejects.toThrow('read-only');
+  expect(called).toBe(false);
+  expect(fake.sessions).toHaveLength(0);
 });
 type Reply = {
   rows?: unknown[][];
@@ -137,7 +127,9 @@ function native(reply: (sql: string) => Reply, version = 'Adaptive Server Enterp
             }
             if (data.affected) emitter.emit('rowcount', data.affected);
             if (data.error) emitter.emit('error', new Error(data.error));
-            free();
+            // A paused stream is not naturally exhausted; its deferred cancel
+            // must release it. Keep the cancellation-count assertion meaningful.
+            if (!stopped) free();
           });
           return request;
         },
@@ -236,25 +228,17 @@ it('ASE rejects lossy values and duplicate names, preserves exact NUMERIC and re
   const failed = native(() => ({ rows: [[1], [2], [3], [4]], error: 'write failed' }));
   await expect(
     failed.adapter.query('UPDATE sample SET id=1', [], { ...options, readOnly: false }),
-  ).rejects.toThrow('write failed');
+  ).rejects.toThrow('read-only');
+  expect(failed.sessions).toHaveLength(0);
   await failed.adapter.disconnect();
 });
 
-it('ASE multi-statement DDL stays on one session and rolls back failure', async () => {
-  const fake = native((sql) => (sql === 'bad ddl' ? { error: 'syntax error' } : {}));
+it('ASE rejects DDL before opening a session', async () => {
+  const fake = native(() => ({}));
   await expect(
-    fake.adapter.executeDdl(['CREATE TABLE t(id int)', 'bad ddl'], 1000),
-  ).rejects.toThrow('ddl in tran');
-  expect(fake.sessions[1].statements).toEqual([
-    'BEGIN TRANSACTION',
-    'CREATE TABLE t(id int)',
-    'bad ddl',
-    'ROLLBACK TRANSACTION',
-  ]);
-  expect(fake.sessions[1].closed).toBe(true);
-  await fake.adapter.executeDdl(['CREATE TABLE t(id int)', 'DROP TABLE t'], 1000);
-  expect(fake.sessions[2].statements.at(-1)).toBe('COMMIT TRANSACTION');
-  await fake.adapter.disconnect();
+    fake.adapter.executeDdl(['CREATE TABLE t(id int)', 'DROP TABLE t'], 1000),
+  ).rejects.toThrow('read-only');
+  expect(fake.sessions).toHaveLength(0);
 });
 
 function catalog() {
@@ -262,6 +246,7 @@ function catalog() {
     missing = false,
     defaultText = "DEFAULT 'old'";
   const adapter = {
+    connect: async () => {},
     schemas: async () => ['dbo'],
     tables: async () => [
       { name: 'sample', schema: 'dbo', kind: 'table' },
@@ -344,11 +329,11 @@ const ref = {
 };
 it('ASE rejects a different server product and explicitly unsupported operations', async () => {
   const wrong = native(() => ({}), 'Microsoft SQL Server 2022');
-  await expect(wrong.adapter.connect()).rejects.toThrow('supports SAP ASE');
+  await expect(wrong.adapter.connect()).rejects.toThrow('supports ASE');
   expect(wrong.sessions.every((session) => session.closed)).toBe(true);
   const fake = native(() => ({}));
   await expect(fake.adapter.query('EXPLAIN SELECT 1', [], options)).rejects.toThrow(
-    'not supported',
+    'read-only SELECT',
   );
   expect(fake.sessions).toHaveLength(0);
   expect(() => new SqlBuilder('sybase').insert(ref, {})).toThrow('explicit column');
@@ -500,53 +485,20 @@ it('ASE creates all four object kinds and rejects unsupported trigger timing and
   ).rejects.toThrow();
 });
 
-it('ASE edits columns, composite PK, views, indexes and triggers and uses ASE drop syntax', async () => {
+it('ASE structure and object definitions are read-only and cannot produce edit plans', async () => {
   const { adapter } = catalog();
   const detail = await describeStructure(adapter, connection, ref);
-  expect(
-    planStructure(detail, { action: 'type', column: 'note', type: 'varchar(80)' }).statements,
-  ).toEqual(['ALTER TABLE [dbo].[sample] MODIFY [note] varchar(80) NULL']);
-  expect(
-    planStructure(detail, { action: 'default', column: 'note', defaultSql: "'new'" }).statements[0],
-  ).toContain("REPLACE [note] DEFAULT 'new'");
-  expect(
-    planStructure(detail, { action: 'rename', column: 'note', name: 'label' }).statements[0],
-  ).toContain('EXEC sp_rename');
-  expect(planStructure(detail, { action: 'drop', column: 'note' }).statements[0]).toBe(
-    'ALTER TABLE [dbo].[sample] DROP [note]',
-  );
-  const composite = planStructure(detail, {
-    action: 'edit-columns',
-    changes: [],
-    primaryKey: ['id', 'note'],
-  });
-  expect(composite.statements).toContain(
-    'ALTER TABLE [dbo].[sample] MODIFY [note] varchar(40) NOT NULL',
-  );
-  expect(composite.statements.at(-1)).toContain('ADD PRIMARY KEY ([id], [note])');
-  const view = await describeStructure(adapter, connection, {
-    schema: 'dbo',
-    table: 'sample_view',
-  });
-  expect(planStructure(view, { action: 'view', sql: view.definition }).statements[0]).toMatch(
-    /^CREATE OR REPLACE VIEW/,
-  );
+  expect(detail.readOnlyReason).toContain('read-only');
+  expect(() =>
+    planStructure(detail, { action: 'type', column: 'note', type: 'varchar(80)' }),
+  ).toThrow('read-only');
   const index = await readObjectDefinition(adapter, connection, ref);
-  expect(planObjectChange(index, ref, index.editableSql).statements[0]).toBe(
-    'DROP INDEX [dbo].[sample].[ix_sample]',
-  );
-  expect(() => planObjectChange(index, ref, index.editableSql + ' DROP TABLE sample')).toThrow();
-  expect((await planDropObject(adapter, connection, ref)).statements[0]).toBe(
-    'DROP INDEX [dbo].[sample].[ix_sample]',
-  );
+  expect(index.readOnlyReason).toContain('read-only');
+  expect(() => planObjectChange(index, ref, index.editableSql)).toThrow('read-only');
+  await expect(planDropObject(adapter, connection, ref)).rejects.toThrow('read-only');
   const triggerRef = { ...ref, kind: 'trigger' as const, objectName: 'tr_sample' };
   const trigger = await readObjectDefinition(adapter, connection, triggerRef);
-  expect(planObjectChange(trigger, triggerRef, trigger.editableSql).statements[0]).toMatch(
-    /^CREATE OR REPLACE TRIGGER/,
-  );
-  expect((await planDropObject(adapter, connection, triggerRef)).statements[0]).toBe(
-    'DROP TRIGGER [dbo].[tr_sample]',
-  );
+  expect(trigger.readOnlyReason).toContain('read-only');
 });
 
 it('ASE SQL uses quoted identifiers, positional parameters and conservative classification', () => {
@@ -568,7 +520,7 @@ it('ASE SQL uses quoted identifiers, positional parameters and conservative clas
   expect(typeOptions('sybase', 'NUMERIC').scale).toBe(true);
 });
 
-it('ASE renames four object kinds using its own sp_rename dialect', async () => {
+it('ASE rejects rename plans for all four object kinds', async () => {
   const { adapter } = catalog();
   for (const [kind, objectName] of [
     ['table', 'sample'],
@@ -576,15 +528,8 @@ it('ASE renames four object kinds using its own sp_rename dialect', async () => 
     ['index', 'ix_sample'],
     ['trigger', 'tr_sample'],
   ] as const) {
-    const plan = await planRenameObject(adapter, connection, {
-      ...ref,
-      kind,
-      objectName,
-      newName: 'renamed',
-    });
-    expect(plan.statements[0]).toContain("EXEC sp_rename '");
-    expect(plan.statements[0]).not.toContain('sys.sp_rename');
-    if (kind === 'index')
-      expect(plan.statements[0]).toContain("[dbo].[sample].[ix_sample]', 'renamed', 'index'");
+    await expect(
+      planRenameObject(adapter, connection, { ...ref, kind, objectName, newName: 'renamed' }),
+    ).rejects.toThrow('read-only');
   }
 });

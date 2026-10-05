@@ -49,7 +49,9 @@ try {
     .fill('DatabaseWorkspace_Missing_ASE_Driver');
   await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'ASE' }).waitFor();
-  assert.ok(!(await page.getByRole('status').innerText()).includes('test-secret-do-not-persist'));
+  assert.ok(
+    !(await page.locator('.connection-message').innerText()).includes('test-secret-do-not-persist'),
+  );
   await page.getByLabel('Read timeout (ms)').fill('1200');
   await page.getByLabel('Write timeout (ms)').fill('1500');
   await page.getByLabel('Heartbeat interval (seconds)').fill('30');
@@ -109,12 +111,63 @@ try {
   );
   await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Java' }).waitFor();
-  assert.ok(!(await page.getByRole('status').innerText()).includes('test-secret-do-not-persist'));
+  assert.ok(
+    !(await page.locator('.connection-message').innerText()).includes('test-secret-do-not-persist'),
+  );
   await call('settings.save', { ...(await call('settings.get')), language: 'zh-TW' });
   await page.getByText('ASE Java 路徑', { exact: true }).waitFor();
-  await page.screenshot({ path: '.local/ase-jdbc-encoding.png' });
+  console.log('Checking ASE read-only restrictions before native login...');
+  for (const sql of [
+    'UPDATE t SET x=1',
+    'SELECT * INTO other FROM t',
+    'SELECT dbo.write$probe()',
+  ]) {
+    const result = await page.evaluate(
+      ({ connectionId, sql }) => window.desktop.command('query.execute', { connectionId, sql }),
+      { connectionId: saved.id, sql },
+    );
+    assert.equal(result.success, false);
+    assert.match(result.error, /read-only/i);
+  }
+  for (const language of ['en', 'zh-TW']) {
+    for (const theme of ['light', 'dark']) {
+      for (const [width, height] of [
+        [1280, 720],
+        [1920, 1080],
+      ]) {
+        console.log(`Checking ASE form: ${language}/${theme}/${width}x${height}...`);
+        await call('settings.save', { ...(await call('settings.get')), language, theme });
+        await page.setViewportSize({ width, height });
+        const notice =
+          language === 'en'
+            ? 'Sybase is read-only. ASE 11.x is the current test target; ASE 16.x remains unverified. Writes, DDL, SQL file execution and native SQL export are disabled. SQL Anywhere and IQ are not supported.'
+            : 'Sybase 僅提供唯讀功能。目前以 ASE 11.x 為實測目標，16.x 尚未驗證。已停用寫入、DDL、SQL 檔案執行及原生 SQL 匯出。不支援 SQL Anywhere 與 IQ。';
+        await page.getByText(notice, { exact: true }).waitFor();
+        const connectionLabel = page.locator('.connection-main small').filter({
+          hasText: language === 'en' ? 'sybase · Read-only' : 'sybase · 唯讀',
+        });
+        await connectionLabel.waitFor({ state: 'attached' });
+        const geometry = await page.evaluate(() => {
+          const modal =
+            document.querySelector('.connection-form') || document.querySelector('[role="dialog"]');
+          const save = [...document.querySelectorAll('button')].find((button) =>
+            /Save connection|儲存連線/.test(button.textContent || ''),
+          );
+          return {
+            documentWidth: document.documentElement.scrollWidth,
+            viewport: innerWidth,
+            dialogWidth: modal?.getBoundingClientRect().width,
+            saveHeight: save?.offsetHeight,
+          };
+        });
+        assert.ok(geometry.documentWidth <= geometry.viewport + 1);
+        assert.equal(geometry.saveHeight, 32);
+        await page.screenshot({ path: `.local/ase-readonly-${language}-${theme}-${width}.png` });
+      }
+    }
+  }
   console.log(
-    'ASE desktop smoke passed: form, TLS validation, missing ODBC/JDBC tools, encoding save/edit, Chinese labels and credential protection. No ASE server was used.',
+    'ASE desktop smoke passed: read-only rejection, form, TLS validation, missing ODBC/JDBC tools, encoding save/edit, language/theme/size matrix and credential protection. No ASE server was used.',
   );
 } finally {
   await app.close();

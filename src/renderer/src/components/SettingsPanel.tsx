@@ -62,7 +62,7 @@ export function SettingsPanel({
             variant="ghost"
             aria-label={t('Close')}
             disabled={saving}
-            onClick={onClose}
+            onClick={() => void requestClose()}
           >
             ✕
           </Button>
@@ -258,7 +258,7 @@ export function SettingsPanel({
             </Alert>
           )}
           <div className="settings-actions">
-            <Button variant="outline" disabled={saving} onClick={onClose}>
+            <Button variant="outline" disabled={saving} onClick={() => void requestClose()}>
               {t('Cancel')}
             </Button>
             <Button

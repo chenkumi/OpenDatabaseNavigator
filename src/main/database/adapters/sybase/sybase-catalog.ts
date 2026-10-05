@@ -6,8 +6,11 @@ import type {
   TableRef,
 } from '../../../../shared/types';
 import { SqlBuilder } from '../../sql-builder';
+import { aseLegacyIdentifier } from './legacy-sql';
 
 const b = new SqlBuilder('sybase');
+const legacy = (adapter: SqlAdapter) =>
+  (adapter as SqlAdapter & { aseMajorVersion?: number }).aseMajorVersion === 11;
 export async function aseRows(adapter: SqlAdapter, sql: string, params: unknown[] = []) {
   const result = await adapter.query(sql, params, { limit: 5000, timeout: 30000, readOnly: true });
   if (result.hasMore) throw new Error('ASE metadata exceeds the 5000-row limit.');
@@ -22,14 +25,16 @@ export async function aseSchemas(adapter: SqlAdapter) {
   return (
     await aseRows(
       adapter,
-      "SELECT name FROM dbo.sysusers WHERE uid > 0 AND (suid >= 0 OR name = 'dbo') ORDER BY name",
+      // Index owners are the owners of their user tables. A trigger can have
+      // a different owner, so include it only when aseObjects can list it.
+      "SELECT DISTINCT u.name FROM dbo.sysusers u, dbo.sysobjects o WHERE u.uid=o.uid AND (o.type IN ('U','V') OR (o.type='TR' AND EXISTS (SELECT 1 FROM dbo.sysobjects parent WHERE parent.deltrig=o.id OR parent.instrig=o.id OR parent.updtrig=o.id))) ORDER BY u.name",
     )
   ).map((row) => String(row.name));
 }
 export async function aseTables(adapter: SqlAdapter, schema?: string): Promise<TableInfo[]> {
   const rows = await aseRows(
     adapter,
-    "SELECT o.name, u.name AS schema_name, o.type AS kind FROM dbo.sysobjects o JOIN dbo.sysusers u ON u.uid=o.uid WHERE o.type IN ('U','V')" +
+    "SELECT o.name, u.name AS schema_name, o.type AS kind FROM dbo.sysobjects o, dbo.sysusers u WHERE u.uid=o.uid AND o.type IN ('U','V')" +
       (schema ? ' AND u.name=?' : '') +
       ' ORDER BY u.name,o.name',
     schema ? [schema] : [],
@@ -37,13 +42,14 @@ export async function aseTables(adapter: SqlAdapter, schema?: string): Promise<T
   return rows.map((row) => ({
     name: String(row.name),
     schema: String(row.schema_name),
-    kind: row.kind === 'V' ? 'view' : 'table',
+    kind: String(row.kind).trim().toUpperCase() === 'V' ? 'view' : 'table',
   }));
 }
 export async function aseDefinition(adapter: SqlAdapter, ref: TableRef) {
+  await adapter.connect();
   const rows = await aseRows(
     adapter,
-    'SELECT c.text FROM dbo.syscomments c JOIN dbo.sysobjects o ON o.id=c.id JOIN dbo.sysusers u ON u.uid=o.uid WHERE u.name=? AND o.name=? ORDER BY c.number,c.colid2,c.colid',
+    `SELECT c.text FROM dbo.syscomments c, dbo.sysobjects o, dbo.sysusers u WHERE o.id=c.id AND u.uid=o.uid AND u.name=? AND o.name=? ORDER BY c.number,${legacy(adapter) ? '' : 'c.colid2,'}c.colid`,
     [ref.schema || 'dbo', ref.table],
   );
   if (rows.some((row) => row.text == null))
@@ -58,22 +64,25 @@ export function aseDefault(text: string) {
   return expression?.trim().replace(/;\s*$/, '') ?? '';
 }
 export async function aseColumns(adapter: SqlAdapter, ref: TableRef) {
-  const target = b.table({ schema: ref.schema || 'dbo', table: ref.table });
+  await adapter.connect();
+  const target = legacy(adapter)
+    ? [ref.schema || 'dbo', ref.table].map(aseLegacyIdentifier).join('.')
+    : b.table({ schema: ref.schema || 'dbo', table: ref.table });
   const raw = await aseRows(
     adapter,
-    `SELECT c.name,t.name AS type,t.usertype,c.length,c.prec,c.scale,c.status,c.status2,c.computedcol,c.cdefault,c.domain
-     FROM dbo.syscolumns c JOIN dbo.systypes t ON t.usertype=c.usertype JOIN dbo.sysobjects o ON o.id=c.id
-     JOIN dbo.sysusers u ON u.uid=o.uid WHERE u.name=? AND o.name=? ORDER BY c.colid`,
+    `SELECT c.name,t.name AS type,t.usertype,c.length,c.prec,c.scale,c.status,${legacy(adapter) ? '0 AS status2,0 AS computedcol' : 'c.status2,c.computedcol'},c.cdefault,c.domain
+     FROM dbo.syscolumns c, dbo.systypes t, dbo.sysobjects o, dbo.sysusers u
+     WHERE t.usertype=c.usertype AND o.id=c.id AND u.uid=o.uid AND u.name=? AND o.name=? ORDER BY c.colid`,
     [ref.schema || 'dbo', ref.table],
   );
   const primary = await aseRows(
     adapter,
-    "SELECT i.name,index_col(?,i.indid,v.number) AS column_name,v.number AS position FROM dbo.sysindexes i JOIN master.dbo.spt_values v ON v.type='P' AND v.number BETWEEN 1 AND i.keycnt WHERE i.id=object_id(?) AND (i.status & 2048)=2048 ORDER BY v.number",
+    "SELECT i.name,index_col(?,i.indid,v.number) AS column_name,v.number AS position FROM dbo.sysindexes i, master.dbo.spt_values v WHERE v.type='P' AND v.number BETWEEN 1 AND i.keycnt AND i.id=object_id(?) AND (i.status & 2048)=2048 ORDER BY v.number",
     [target, target],
   );
   const defaults = await aseRows(
     adapter,
-    'SELECT c.id,c.text FROM dbo.syscomments c WHERE c.id IN (SELECT cdefault FROM dbo.syscolumns WHERE id=object_id(?) AND cdefault<>0) ORDER BY c.id,c.number,c.colid2,c.colid',
+    `SELECT c.id,c.text FROM dbo.syscomments c WHERE c.id IN (SELECT cdefault FROM dbo.syscolumns WHERE id=object_id(?) AND cdefault<>0) ORDER BY c.id,c.number,${legacy(adapter) ? '' : 'c.colid2,'}c.colid`,
     [target],
   );
   const texts = new Map<string, string>();
@@ -121,8 +130,8 @@ export async function aseObjects(
   const rows = await aseRows(
     adapter,
     kind === 'index'
-      ? "SELECT i.name,u.name AS schema_name,o.name AS table_name FROM dbo.sysindexes i JOIN dbo.sysobjects o ON o.id=i.id JOIN dbo.sysusers u ON u.uid=o.uid WHERE o.type='U' AND i.indid>0 AND i.indid<255 ORDER BY u.name,o.name,i.name"
-      : "SELECT tr.name,u.name AS schema_name,o.name AS table_name FROM dbo.sysobjects tr JOIN dbo.sysobjects o ON tr.deltrig=o.id JOIN dbo.sysusers u ON u.uid=tr.uid WHERE tr.type='TR' ORDER BY u.name,o.name,tr.name",
+      ? "SELECT i.name,u.name AS schema_name,o.name AS table_name FROM dbo.sysindexes i, dbo.sysobjects o, dbo.sysusers u WHERE o.id=i.id AND u.uid=o.uid AND o.type='U' AND i.indid>0 AND i.indid<255 ORDER BY u.name,o.name,i.name"
+      : "SELECT tr.name,u.name AS schema_name,o.name AS table_name FROM dbo.sysobjects tr, dbo.sysobjects o, dbo.sysusers u WHERE (o.deltrig=tr.id OR o.instrig=tr.id OR o.updtrig=tr.id) AND u.uid=tr.uid AND tr.type='TR' ORDER BY u.name,o.name,tr.name",
   );
   return rows.map((row) => ({
     name: String(row.name),
@@ -136,6 +145,11 @@ export async function aseIndex(
   adapter: SqlAdapter,
   ref: { schema: string; table: string; objectName: string },
 ) {
+  await adapter.connect();
+  if (legacy(adapter))
+    throw new Error(
+      'ASE 11.x index details are not yet verified; only index listing is available.',
+    );
   const table = b.table(ref);
   const rows = await aseRows(
     adapter,

@@ -317,6 +317,7 @@ try {
   // dialog focus restoration cannot steal the filter's ArrowDown below.
   await expect(page.locator('.insert-row-dialog')).toHaveCount(0);
   await expect(page.locator('.table-view .table-operation')).toHaveAttribute('aria-busy', 'false');
+  await page.getByRole('button', { name: 'Filters', exact: true }).click();
   await selectValue(page, page.getByLabel('Filter column', { exact: true }), 'name');
   await page.getByLabel('Filter value', { exact: true }).fill('Charlie');
   await page.getByRole('button', { name: 'Apply', exact: true }).click();

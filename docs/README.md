@@ -32,4 +32,5 @@
 - [實作紀錄](history/implementation-log.md)：逐次迭代的實作範圍與驗證結果。
 - [功能對照表](history/function-coverage.md)與[原始需求清單](history/requirements.txt)：預定功能與實作的對照。
 - [Code Review 2026-09-28](history/code-review-2026-09-28.md)：早期審查與修正（必須避免重現的問題）。
+- [Code Review 2026-10-05](history/code-review-2026-10-05.md)：全專案審查、已修正項目與待辦的效能與正確性改進。
 - [UI 重構](history/ui-refactor.md)、[UI 規範審查](history/ui-design-review.md)。

@@ -19,6 +19,7 @@
   --ui-control-large: 36px;
   --ui-menu-row: 36px;
   --ui-radius: 6px;
+  --ui-filter-panel-width: 320px;
 }
 body {
   font-family: var(--ui-font);

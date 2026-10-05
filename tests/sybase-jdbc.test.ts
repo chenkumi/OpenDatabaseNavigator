@@ -186,48 +186,18 @@ describe.skipIf(!javaHome || compiler?.status !== 0)(
       }
     }, 30000);
 
-    it('preserves SQL status globals between stateful script batches and DDL statements', async () => {
+    it('rejects JDBC scripts and DDL without invoking script callbacks', async () => {
       const adapter = new SybaseAdapter(config(), 'secret');
-      const signal = new AbortController().signal;
-      const checkRows = "IF @@rowcount <> 2 RAISERROR 20000 'rowcount changed'";
-      const checkError = "IF @@error <> 777 RAISERROR 20001 'error changed'";
-      try {
-        await adapter.withScriptSession(async (execute) => {
-          await execute('UPDATE two', signal, 15000);
-          await execute(checkRows, signal, 15000);
-          await expect(execute('UPDATE fail', signal, 15000)).rejects.toThrow('fixture error 777');
-          await execute(checkError, signal, 15000);
-        });
-        await adapter.executeDdl(['UPDATE two', checkRows], 15000);
-      } finally {
-        await adapter.disconnect();
-      }
-    }, 30000);
-
-    it('verifies encoding at script completion and before DDL commit, and honors final cancellation', async () => {
-      const adapter = new SybaseAdapter(config(), 'secret');
-      const signal = new AbortController().signal;
-      try {
-        await expect(
-          adapter.withScriptSession(async (execute) => {
-            await execute('SELECT switch_charset', signal, 15000);
-          }),
-        ).rejects.toThrow('character set differs');
-        await expect(
-          adapter.executeDdl(['UPDATE two', 'SELECT switch_charset'], 15000),
-        ).rejects.toThrow('character set differs');
-        const controller = new AbortController();
-        await expect(
-          adapter.withScriptSession(async (execute) => {
-            await execute('UPDATE two', controller.signal, 15000);
-            controller.abort();
-          }),
-        ).rejects.toThrow(/cancelled/i);
-        await adapter.heartbeat(15000);
-      } finally {
-        await adapter.disconnect();
-      }
-    }, 30000);
+      let called = false;
+      await expect(
+        adapter.withScriptSession(async () => {
+          called = true;
+        }),
+      ).rejects.toThrow('read-only');
+      await expect(adapter.executeDdl(['UPDATE two'], 15000)).rejects.toThrow('read-only');
+      expect(called).toBe(false);
+      await adapter.disconnect();
+    });
 
     it('keeps a script on one physical session and rejects lossy SQL/parameters before execution', async () => {
       const adapter = new SybaseAdapter(config('big5'), 'secret');
@@ -267,10 +237,7 @@ describe.skipIf(!javaHome || compiler?.status !== 0)(
             session.close((error) => (error ? reject(error) : resolve())),
           );
         }
-        await adapter.withScriptSession(async (execute) => {
-          await execute('UPDATE sample', new AbortController().signal, 15000);
-          await execute('SELECT state', new AbortController().signal, 15000);
-        });
+        await expect(adapter.withScriptSession(async () => {})).rejects.toThrow('read-only');
       } finally {
         await adapter.disconnect();
       }

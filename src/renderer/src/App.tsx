@@ -5,6 +5,7 @@ import { confirmAction, ConfirmDialog } from './components/ConfirmDialog';
 import { TAB_DRAG_TYPE, reorderTabs } from './tab-order';
 const LOG_PAGE = 100;
 import { Button } from './components/ui/button';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -136,9 +137,30 @@ export function App() {
     });
   };
   const workspaceRevision = useRef(0);
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
   const applyWorkspace = (value: Workspace) => {
     workspaceRevision.current++;
     setWorkspace(value);
+  };
+  /**
+   * Change events leave out a result that has not changed. Reuse the previous
+   * object (which also keeps its identity stable for the grid); if the version
+   * moved but no result came, our copy is stale, so read the full state.
+   */
+  const applyWorkspaceEvent = (value: Workspace) => {
+    let stale = false;
+    const previous = new Map(workspaceRef.current.tabs.map((tab) => [tab.id, tab]));
+    const tabs = value.tabs.map((tab) => {
+      if (tab.result) return tab;
+      const old = previous.get(tab.id);
+      if (old?.result && (old.resultVersion ?? 0) === (tab.resultVersion ?? 0))
+        return { ...tab, result: old.result };
+      if (old?.result) stale = true;
+      return tab;
+    });
+    applyWorkspace({ ...value, tabs });
+    if (stale) void refreshWorkspace().catch(onError);
   };
   const refreshWorkspace = () => {
     const revision = workspaceRevision.current;
@@ -160,7 +182,7 @@ export function App() {
     ]).catch(onError);
     return window.desktop.subscribe((event) => {
       if (['WorkspaceChanged', 'TabCreated', 'TableOpened'].includes(event.type))
-        applyWorkspace(event.payload as Workspace);
+        applyWorkspaceEvent(event.payload as Workspace);
       if (
         [
           'DatabaseObjectCreated',
@@ -554,6 +576,7 @@ export function App() {
                                 </strong>
                                 <small>
                                   {connection.engine} ·{' '}
+                                  {connection.engine === 'sybase' && <>{t('Read-only')} · </>}
                                   {t(
                                     statuses[connection.id]?.disconnecting
                                       ? 'Disconnecting…'
@@ -787,7 +810,9 @@ export function App() {
                               void (async () => {
                                 // Only plain reads re-run without asking; anything else may change data.
                                 if (
-                                  !/^\s*(select|show|explain|describe|desc)\b/i.test(entry.sql) &&
+                                  (!/^\s*(select|show|explain|describe|desc)\b/i.test(entry.sql) ||
+                                    // EXPLAIN ANALYZE runs the statement; SELECT ... INTO writes.
+                                    /\b(analyze|into)\b/i.test(entry.sql)) &&
                                   !(await confirmAction(
                                     t('Re-run this statement? It may change or delete data.'),
                                   ))
@@ -984,41 +1009,47 @@ export function App() {
                           )}
                         </p>
                       )}
-                    {!statuses[tab.connectionId]?.connected &&
-                    !everConnected.current.has(tab.id) ? (
-                      <p className="navigation-empty">{t('Double-click to connect')}</p>
-                    ) : tab.type === 'create' ? (
-                      <CreateObjectView
-                        tab={tab}
-                        connection={connections.find(
-                          (connection) => connection.id === tab.connectionId,
-                        )!}
-                      />
-                    ) : tab.type === 'index' || tab.type === 'trigger' ? (
-                      <DatabaseObjectView tab={tab} />
-                    ) : tab.type === 'table' ? (
-                      <TableView
-                        tab={tab}
-                        settings={settings}
-                        onError={onError}
-                        viewRequest={tableRequests[tab.id]}
-                      />
-                    ) : tab.type === 'redis' ? (
-                      <RedisView tab={tab} onError={onError} />
-                    ) : (
-                      <QueryView
-                        tab={tab}
-                        settings={settings}
-                        busy={Object.values(running).some((query) => query.tabId === tab.id)}
-                        onRun={(sql) => void runQuery(tab, sql).catch(onError)}
-                        onError={onError}
-                        onStop={() => {
-                          for (const [id, query] of Object.entries(running))
-                            if (query.tabId === tab.id)
-                              void command('query.cancel', { id }).catch(onError);
-                        }}
-                      />
-                    )}
+                    <ErrorBoundary>
+                      {!statuses[tab.connectionId]?.connected &&
+                      !everConnected.current.has(tab.id) ? (
+                        <p className="navigation-empty">{t('Double-click to connect')}</p>
+                      ) : tab.type === 'create' ? (
+                        <CreateObjectView
+                          tab={tab}
+                          connection={connections.find(
+                            (connection) => connection.id === tab.connectionId,
+                          )!}
+                        />
+                      ) : tab.type === 'index' || tab.type === 'trigger' ? (
+                        <DatabaseObjectView tab={tab} />
+                      ) : tab.type === 'table' ? (
+                        <TableView
+                          readOnly={
+                            connections.find((connection) => connection.id === tab.connectionId)
+                              ?.engine === 'sybase'
+                          }
+                          tab={tab}
+                          settings={settings}
+                          onError={onError}
+                          viewRequest={tableRequests[tab.id]}
+                        />
+                      ) : tab.type === 'redis' ? (
+                        <RedisView tab={tab} onError={onError} />
+                      ) : (
+                        <QueryView
+                          tab={tab}
+                          settings={settings}
+                          busy={Object.values(running).some((query) => query.tabId === tab.id)}
+                          onRun={(sql) => void runQuery(tab, sql).catch(onError)}
+                          onError={onError}
+                          onStop={() => {
+                            for (const [id, query] of Object.entries(running))
+                              if (query.tabId === tab.id)
+                                void command('query.cancel', { id }).catch(onError);
+                          }}
+                        />
+                      )}
+                    </ErrorBoundary>
                   </TabsContent>
                 ))}
               </Tabs>

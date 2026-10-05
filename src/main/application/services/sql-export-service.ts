@@ -130,16 +130,22 @@ export class SqlExportService {
           job.progress.error += ' Could not remove the temporary export file.';
         });
       } finally {
-        this.audit.record({
-          actor,
-          command: 'export.finished',
-          connectionId: input.connectionId,
-          database: input.database,
-          summary: JSON.stringify(input),
-          status: job.progress.state === 'completed' ? 'success' : 'error',
-          duration: 0,
-          result: JSON.stringify(job.progress),
-        });
+        // Auditing must never reject job.work: release() and shutdown() await it
+        // before cleaning up temporary files.
+        try {
+          this.audit.record({
+            actor,
+            command: 'export.finished',
+            connectionId: input.connectionId,
+            database: input.database,
+            summary: JSON.stringify(input),
+            status: job.progress.state === 'completed' ? 'success' : 'error',
+            duration: 0,
+            result: JSON.stringify(job.progress),
+          });
+        } catch (error) {
+          console.error('Could not audit export completion', error);
+        }
         emit(true);
       }
     })();
@@ -220,7 +226,7 @@ export class SqlExportService {
     // revocation or connection deletion; it never returns database contents.
     const job = this.owned(id, actor, false);
     job.controller.abort();
-    await job.work;
+    await job.work.catch(() => undefined);
     this.jobs.delete(id);
     await this.removeFiles(job);
     return { released: true };
@@ -243,8 +249,8 @@ export class SqlExportService {
     for (const job of this.jobs.values()) job.controller.abort();
     await Promise.all(
       [...this.jobs.values()].map(async (job) => {
-        await job.work;
-        await this.removeFiles(job);
+        await job.work.catch(() => undefined);
+        await this.removeFiles(job).catch(() => undefined);
       }),
     );
     this.jobs.clear();

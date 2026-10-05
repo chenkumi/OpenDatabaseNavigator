@@ -1,4 +1,14 @@
 {
+  "Owner {name}": "擁有者 {name}",
+  "SAP / Sybase ASE (read-only, experimental)": "SAP / Sybase ASE（唯讀、實驗性）",
+  "Read-only": "唯讀",
+  "Loading data…": "資料讀取中…",
+  "Filters": "過濾",
+  "Close filters": "收合過濾",
+  "Sybase is read-only. ASE 11.x is the current test target; ASE 16.x remains unverified. Writes, DDL, SQL file execution and native SQL export are disabled. SQL Anywhere and IQ are not supported.": "Sybase 僅提供唯讀功能。目前以 ASE 11.x 為實測目標，16.x 尚未驗證。已停用寫入、DDL、SQL 檔案執行及原生 SQL 匯出。不支援 SQL Anywhere 與 IQ。",
+  "ODBC (server default)": "ODBC（伺服器預設編碼）",
+  "ODBC uses the server default character set. JDBC requires JDK 11+ and SAP jconn4.jar. Encoding compatibility must be verified with your server; reconnect after changing this setting. Sybase remains read-only.": "ODBC 使用伺服器預設字元集。JDBC 需要 JDK 11+ 與 SAP jconn4.jar。編碼相容性仍需依伺服器驗證，變更後請重新連線。Sybase 仍僅提供唯讀功能。",
+  "SAP / Sybase ASE is read-only in this release. Writes, DDL, SQL file execution and native SQL export are disabled.": "此版本的 SAP / Sybase ASE 僅提供唯讀功能，已停用寫入、DDL、SQL 檔案執行及原生 SQL 匯出。",
   "Optional — select a database after connecting": "選填，連線後可選擇資料庫",
   "Please enter a connection name.": "請輸入連線名稱。",
   "Please select a database file.": "請選擇資料庫檔案。",
@@ -692,5 +702,7 @@
   "All conditions must match (AND)": "必須符合所有條件（AND）",
   "Query results": "查詢結果",
   "Redis DB {index}": "Redis 資料庫 {index}",
-  "Select": "選取"
+  "Select": "選取",
+  "This view failed to render.": "此畫面無法顯示。",
+  "Retry": "重試"
 }

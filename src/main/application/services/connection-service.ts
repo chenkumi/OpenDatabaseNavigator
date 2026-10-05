@@ -102,6 +102,10 @@ export class ConnectionService {
   }
   status(id: string) {
     this.get(id);
+    return this.state(id);
+  }
+  /** Status from in-memory state only, safe once the connection was deleted. */
+  private state(id: string) {
     return {
       connected:
         !this.closing.has(id) &&
@@ -216,12 +220,12 @@ export class ConnectionService {
         // the rejected promise would stay registered forever.
         queueMicrotask(() => {
           this.connecting.delete(key);
-          this.events.emit('ConnectionChanged', { connectionId: id, ...this.status(id) });
+          this.events.emit('ConnectionChanged', { connectionId: id, ...this.state(id) });
         });
       }
     })();
     this.connecting.set(key, pending);
-    this.events.emit('ConnectionChanged', { connectionId: id, ...this.status(id) });
+    this.events.emit('ConnectionChanged', { connectionId: id, ...this.state(id) });
     return pending;
   }
   /**
@@ -245,7 +249,7 @@ export class ConnectionService {
     this.heartbeats.delete(oldest.key);
     this.adapters.delete(oldest.key);
     void oldest.adapter.disconnect().catch(() => undefined);
-    this.events.emit('ConnectionChanged', { connectionId: id, ...this.status(id) });
+    this.events.emit('ConnectionChanged', { connectionId: id, ...this.state(id) });
   }
   /** Release only this app's target pool; never force other clients off the database. */
   async withDatabaseSuspended<T>(
@@ -274,7 +278,7 @@ export class ConnectionService {
     } finally {
       this.scopeReleases.delete(key);
       this.suspended.delete(key);
-      this.events.emit('ConnectionChanged', { connectionId: id, ...this.status(id) });
+      this.events.emit('ConnectionChanged', { connectionId: id, ...this.state(id) });
     }
   }
   async disconnect(id: string, block = false) {

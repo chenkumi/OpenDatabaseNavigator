@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { assertEngineRisk } from '../../../shared/engine-capabilities';
 import type { Actor, Approval, Connection, Risk, Settings } from '../../../shared/types';
 import { EventBus } from '../../application/events/event-bus';
 const MAX_PENDING_PER_ACTOR = 20;
@@ -32,6 +33,14 @@ export class PermissionService {
         this.grants.clear();
         this.epoch++;
       }
+      if (event.type === 'McpStopped')
+        // The agent sessions that asked are gone; a late approval would run work
+        // nobody is waiting for (for example after revoking a suspicious token).
+        for (const item of this.pending.values())
+          if (item.status === 'pending') {
+            item.status = 'expired';
+            events.emit('ApprovalResolved', { id: item.id, status: item.status });
+          }
     });
   }
   private scope(actor: Actor, command: string, args: Record<string, unknown>, risk: Risk) {
@@ -74,6 +83,7 @@ export class PermissionService {
     return this.grants.get(this.scope(actor, command, args, risk))?.approvalId;
   }
   evaluate(actor: Actor, connection: Connection | undefined, risk: Risk): 'allow' | 'ask' {
+    assertEngineRisk(connection?.engine, risk);
     if (actor.kind === 'human') return 'allow';
     const settings = this.settings();
     if (connection?.agentAccess === 'disabled')

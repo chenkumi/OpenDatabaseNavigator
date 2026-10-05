@@ -99,6 +99,36 @@ export async function mysqlSqlExport(
     if (failure) return Promise.reject(failure);
     return scriptDeadline(options.signal, options.timeout, stop, task);
   };
+  /** Row streaming has no fixed length: time out only when no row or flush progresses. */
+  const runStream = async <T>(task: (touch: () => void) => Promise<T>) => {
+    if (failure) throw failure;
+    if (options.signal.aborted) throw new Error('SQL export cancelled.');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let abort = () => {};
+    let fail: (error: Error) => void = () => {};
+    const cancelled = new Promise<never>((_, reject) => {
+      fail = reject;
+    });
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        stop();
+        fail(new Error('Script statement timed out.'));
+      }, options.timeout);
+    };
+    abort = () => {
+      stop();
+      fail(new Error('Script cancelled.'));
+    };
+    options.signal.addEventListener('abort', abort, { once: true });
+    arm();
+    try {
+      return await Promise.race([task(arm), cancelled]);
+    } finally {
+      clearTimeout(timer);
+      options.signal.removeEventListener('abort', abort);
+    }
+  };
   const query = (sql: string, values: string[] = []) =>
     run(async () => {
       const [rows] = values.length
@@ -366,7 +396,7 @@ export async function mysqlSqlExport(
             options.progress({ tables: completed, rows, currentTable: table.name });
           }
         };
-        await run(async () => {
+        await runStream(async (touch) => {
           stream = client
             .query('SELECT ' + expressions.join(',') + ' FROM ' + qi(table.name))
             .stream({ highWaterMark: 16 });
@@ -375,6 +405,7 @@ export async function mysqlSqlExport(
               throw new Error(
                 'A database value could not be serialized, possibly because it exceeds max_allowed_packet. No partial file was saved.',
               );
+            touch();
             const value = '(' + writable.map((_, i) => String(row['c' + i])).join(',') + ')';
             if (bytes + Buffer.byteLength(value) > 65536) await flush();
             batch.push(value);
@@ -384,6 +415,7 @@ export async function mysqlSqlExport(
           }
           stream = undefined;
           await flush();
+          touch();
         });
       }
       completed++;

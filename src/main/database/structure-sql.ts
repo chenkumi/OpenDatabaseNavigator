@@ -163,12 +163,18 @@ export function validateFragment(value: string, engine: Engine, type = false) {
   }
   if (value.slice(previous).trim())
     throw new Error('SQL comments are not permitted in column types or defaults.');
+  const extra =
+    'KILL CHECKPOINT PRINT THROW RAISERROR IF WHILE GOTO RETURN BREAK CONTINUE BULK OPEN ENABLE DISABLE';
   let depth = 0;
   const forbidden = new Set(
     'SELECT INSERT UPDATE DELETE MERGE CREATE ALTER DROP TRUNCATE EXEC EXECUTE GRANT REVOKE DENY USE SET DECLARE BEGIN COMMIT ROLLBACK PRAGMA ATTACH DETACH BACKUP RESTORE DBCC WAITFOR SHUTDOWN RECONFIGURE'.split(
       ' ',
     ),
   );
+  // T-SQL runs a following statement without a separator, so a default such as
+  // `0 KILL 53` would become a second command. IF is a plain function elsewhere.
+  if (engine === 'sqlserver' || engine === 'sybase')
+    for (const word of extra.trim().split(' ')) forbidden.add(word);
   for (const token of tokens) {
     if (keyword(token, '(')) depth++;
     if (keyword(token, ')') && --depth < 0) throw new Error('Unbalanced SQL expression.');

@@ -8,6 +8,7 @@ import type { Column, TableInfo } from '../../../shared/types';
 import { command } from '../api';
 export function ExplorerTable({
   connectionId,
+  readOnly = false,
   database,
   table,
   displayName = table.name,
@@ -15,6 +16,7 @@ export function ExplorerTable({
   onError,
 }: {
   connectionId: string;
+  readOnly?: boolean;
   database?: string;
   table: TableInfo;
   displayName?: string;
@@ -82,8 +84,8 @@ export function ExplorerTable({
         <ActionMenu
           label={t('Object actions for {name}', { name: displayName })}
           actions={[
-            { label: t(`Rename ${table.kind}`), run: () => setRenaming(true) },
-            { label: t(`Delete ${table.kind}`), run: () => setDeleting(true) },
+            { label: t(`Rename ${table.kind}`), disabled: readOnly, run: () => setRenaming(true) },
+            { label: t(`Delete ${table.kind}`), disabled: readOnly, run: () => setDeleting(true) },
             { label: t('Open data'), run: () => onOpen(false) },
             {
               label: t(table.kind === 'view' ? 'Design view' : 'Design table'),

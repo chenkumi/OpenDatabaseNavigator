@@ -48,7 +48,7 @@ it('ASE nchar and nvarchar columns keep their character length', async () => {
   const { aseColumns } = await import('../src/main/database/adapters/sybase/sybase-catalog');
   const reply = (sql: string) => {
     if (sql.includes('@@ncharsize')) return [{ size: 3 }];
-    if (sql.includes('syscolumns c JOIN'))
+    if (sql.includes('syscolumns c,'))
       return [
         { name: 'a', type: 'nvarchar', length: 150, status: 8, cdefault: 0 },
         { name: 'b', type: 'nchar', length: 30, status: 0, cdefault: 0 },
@@ -57,6 +57,7 @@ it('ASE nchar and nvarchar columns keep their character length', async () => {
     return [];
   };
   const adapter = {
+    connect: async () => {},
     query: async (sql: string) => ({ rows: reply(sql), hasMore: false }),
   } as never;
   const { columns } = await aseColumns(adapter, { schema: 'dbo', table: 't' } as never);
